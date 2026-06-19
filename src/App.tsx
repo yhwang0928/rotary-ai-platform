@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, ExternalLink, FolderKanban, LogOut, Pencil, Save, X } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronUp, ExternalLink, FolderKanban, LogOut, Pencil, Plus, Save, X } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { StatCard } from "./components/StatCard";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
 import type {
   ActionItemSummary,
+  MeetingDecision,
+  MeetingDetail,
   MeetingSummary,
   ProjectSummary,
   RequirementSummary,
@@ -19,6 +21,17 @@ type EditingState = {
   kind: EditKind;
   id: string;
   values: Record<string, string>;
+};
+type NewProjectState = {
+  name: string;
+  slug: string;
+  description: string;
+  status: string;
+  start_date: string;
+  expected_end_date: string;
+  google_drive_folder_url: string;
+  drive_folder_label: string;
+  drive_folder_purpose: string;
 };
 
 const APP_NAME = "3481 Rotary AI專案管理平台";
@@ -54,6 +67,17 @@ const requirementStatusLabels: Record<string, string> = {
 const taskStatusOptions = Object.entries(taskStatusLabels);
 const projectStatusOptions = Object.entries(projectStatusLabels);
 const requirementStatusOptions = Object.entries(requirementStatusLabels);
+const emptyNewProject: NewProjectState = {
+  name: "",
+  slug: "",
+  description: "",
+  status: "active",
+  start_date: "",
+  expected_end_date: "",
+  google_drive_folder_url: "",
+  drive_folder_label: "",
+  drive_folder_purpose: "",
+};
 
 function labelFromMap(labels: Record<string, string>, value: string) {
   return labels[value] ?? value;
@@ -79,6 +103,15 @@ function nullable(value: string) {
   return value.trim() === "" ? null : value;
 }
 
+function slugify(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/['"]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [email, setEmail] = useState("");
@@ -93,6 +126,10 @@ function App() {
   const [editing, setEditing] = useState<EditingState | null>(null);
   const [saveMessage, setSaveMessage] = useState("");
   const [ganttScale, setGanttScale] = useState<GanttScale>("week");
+  const [meetingDetail, setMeetingDetail] = useState<MeetingDetail | null>(null);
+  const [meetingDetailLoading, setMeetingDetailLoading] = useState(false);
+  const [isAddingProject, setIsAddingProject] = useState(false);
+  const [newProject, setNewProject] = useState<NewProjectState>(emptyNewProject);
 
   useEffect(() => {
     if (!supabase) return;
@@ -127,8 +164,7 @@ function App() {
       supabase
         .from("meetings")
         .select("id,project_id,title,meeting_date,summary,notes,google_meet_url")
-        .order("meeting_date", { ascending: false })
-        .limit(5),
+        .order("meeting_date", { ascending: false }),
       supabase
         .from("action_items")
         .select("id,project_id,title,description,due_date,status,owner_names,collaborator_names")
@@ -280,6 +316,33 @@ function App() {
     setRequirements([]);
   }
 
+  async function openMeetingDetail(meeting: MeetingSummary) {
+    if (!supabase) return;
+    if (meetingDetail?.meeting.id === meeting.id) {
+      setMeetingDetail(null);
+      return;
+    }
+    setMeetingDetailLoading(true);
+    const [decisionsResult, actionItemsResult] = await Promise.all([
+      supabase
+        .from("meeting_decisions")
+        .select("id,meeting_id,decision,created_at")
+        .eq("meeting_id", meeting.id)
+        .order("created_at"),
+      supabase
+        .from("action_items")
+        .select("id,project_id,title,description,due_date,status,owner_names,collaborator_names")
+        .eq("meeting_id", meeting.id)
+        .order("due_date", { ascending: true, nullsFirst: false }),
+    ]);
+    setMeetingDetailLoading(false);
+    setMeetingDetail({
+      meeting,
+      decisions: (decisionsResult.data ?? []) as MeetingDecision[],
+      actionItems: (actionItemsResult.data ?? []) as ActionItemSummary[],
+    });
+  }
+
   function startEdit(kind: EditKind, item: { id: string } & object) {
     const values = Object.fromEntries(
       Object.entries(item as Record<string, unknown>).map(([key, value]) => [key, value == null ? "" : String(value)]),
@@ -297,6 +360,68 @@ function App() {
     setEditing((current) =>
       current ? { ...current, values: { ...current.values, [field]: value } } : current,
     );
+  }
+
+  function setNewProjectValue(field: keyof NewProjectState, value: string) {
+    setNewProject((current) => ({
+      ...current,
+      [field]: value,
+      ...(field === "name" && !current.slug ? { slug: slugify(value) } : {}),
+    }));
+  }
+
+  function startAddProject() {
+    setSaveMessage("");
+    setEditing(null);
+    setNewProject(emptyNewProject);
+    setIsAddingProject(true);
+  }
+
+  function cancelAddProject() {
+    setSaveMessage("");
+    setNewProject(emptyNewProject);
+    setIsAddingProject(false);
+  }
+
+  async function addProject() {
+    if (!supabase) return;
+
+    const name = newProject.name.trim();
+    const slug = slugify(newProject.slug || newProject.name);
+
+    if (!name || !slug) {
+      setSaveMessage("新增失敗，請填寫專案名稱與英文代碼。");
+      return;
+    }
+
+    setSaveMessage("新增專案中...");
+    const payload = {
+      name,
+      slug,
+      description: nullable(newProject.description),
+      status: newProject.status,
+      start_date: nullable(newProject.start_date),
+      expected_end_date: nullable(newProject.expected_end_date),
+      google_drive_folder_url: nullable(newProject.google_drive_folder_url),
+      drive_folder_label: nullable(newProject.drive_folder_label),
+      drive_folder_purpose: nullable(newProject.drive_folder_purpose),
+    };
+    const { data, error } = await supabase
+      .from("projects")
+      .insert(payload)
+      .select("id,name,slug,description,status,start_date,expected_end_date,google_drive_folder_url,drive_folder_label,drive_folder_purpose,updated_at")
+      .single();
+
+    if (error) {
+      console.error(error);
+      setSaveMessage("新增失敗，請確認你有新增專案權限，且英文代碼沒有重複。");
+      return;
+    }
+
+    setProjects((current) => [...current, data].sort((a, b) => a.name.localeCompare(b.name, "zh-Hant")));
+    setNewProject(emptyNewProject);
+    setIsAddingProject(false);
+    setSaveMessage("已新增專案。");
   }
 
   async function saveEdit() {
@@ -430,6 +555,24 @@ function App() {
             </option>
           ))}
         </select>
+      </label>
+    );
+  }
+
+  function newProjectInput(field: keyof NewProjectState, label: string, type = "text") {
+    return (
+      <label>
+        {label}
+        <input type={type} value={newProject[field]} onChange={(event) => setNewProjectValue(field, event.target.value)} />
+      </label>
+    );
+  }
+
+  function newProjectTextarea(field: keyof NewProjectState, label: string) {
+    return (
+      <label>
+        {label}
+        <textarea value={newProject[field]} onChange={(event) => setNewProjectValue(field, event.target.value)} />
       </label>
     );
   }
@@ -575,7 +718,38 @@ function App() {
           <div className="panel-heading">
             <FolderKanban size={18} />
             <h2>專案列表</h2>
+            <button className="icon-button panel-action" type="button" onClick={startAddProject} title="新增專案" aria-label="新增專案">
+              <Plus size={16} />
+            </button>
           </div>
+          {isAddingProject ? (
+            <div className="add-project-form">
+              <div className="edit-grid">
+                {newProjectInput("name", "專案名稱")}
+                {newProjectInput("slug", "英文代碼")}
+                <label>
+                  狀態
+                  <select value={newProject.status} onChange={(event) => setNewProjectValue("status", event.target.value)}>
+                    {projectStatusOptions.map(([value, labelText]) => (
+                      <option value={value} key={value}>
+                        {labelText}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {newProjectInput("start_date", "開始時間", "date")}
+                {newProjectInput("expected_end_date", "期望結束時間", "date")}
+                {newProjectTextarea("description", "說明")}
+                {newProjectInput("google_drive_folder_url", "Google Drive 連結")}
+                {newProjectInput("drive_folder_label", "Drive 資料夾")}
+                {newProjectTextarea("drive_folder_purpose", "Drive 用途")}
+              </div>
+              <div className="form-actions">
+                <button type="button" onClick={addProject}>新增</button>
+                <button type="button" onClick={cancelAddProject}>取消</button>
+              </div>
+            </div>
+          ) : null}
           <div className="list">
             {projects.map((project) => (
               <article className="list-row" key={project.id}>
@@ -667,33 +841,101 @@ function App() {
           <h2>最近會議</h2>
           <div className="list">
             {meetings.map((meeting) => (
-              <article className="list-row" key={meeting.id}>
-                <div>
-                  {isEditing("meeting", meeting.id) ? (
-                    <div className="edit-grid">
-                      {editInput("title", "會議標題")}
-                      {editInput("meeting_date", "日期", "date")}
-                      {editTextarea("summary", "摘要")}
-                      {editTextarea("notes", "備註")}
-                      {editInput("google_meet_url", "Google Meet 連結")}
-                    </div>
-                  ) : (
-                    <>
-                      <strong>{meeting.title}</strong>
-                      <span>{meeting.meeting_date}</span>
-                      {meeting.summary ? <p>{meeting.summary}</p> : null}
-                    </>
-                  )}
-                </div>
-                <div className="row-actions">
-                  {meeting.google_meet_url && !isEditing("meeting", meeting.id) ? (
-                    <a href={meeting.google_meet_url} target="_blank" rel="noreferrer" title="開啟 Google Meet">
-                      <ExternalLink size={16} />
-                    </a>
-                  ) : null}
-                  {editActions("meeting", meeting)}
-                </div>
-              </article>
+              <div className="meeting-item" key={meeting.id}>
+                <article className="list-row">
+                  <div>
+                    {isEditing("meeting", meeting.id) ? (
+                      <div className="edit-grid">
+                        {editInput("title", "會議標題")}
+                        {editInput("meeting_date", "日期", "date")}
+                        {editTextarea("summary", "摘要")}
+                        {editTextarea("notes", "備註")}
+                        {editInput("google_meet_url", "Google Meet 連結")}
+                      </div>
+                    ) : (
+                      <>
+                        <strong>{meeting.title}</strong>
+                        <span>{meeting.meeting_date}</span>
+                        {meeting.summary ? <p>{meeting.summary}</p> : null}
+                      </>
+                    )}
+                  </div>
+                  <div className="row-actions">
+                    {meeting.google_meet_url && !isEditing("meeting", meeting.id) ? (
+                      <a href={meeting.google_meet_url} target="_blank" rel="noreferrer" title="開啟 Google Meet">
+                        <ExternalLink size={16} />
+                      </a>
+                    ) : null}
+                    <button
+                      className="icon-button"
+                      type="button"
+                      onClick={() => openMeetingDetail(meeting)}
+                      title={meetingDetail?.meeting.id === meeting.id ? "收合會議詳情" : "展開會議詳情"}
+                      aria-label={meetingDetail?.meeting.id === meeting.id ? "收合會議詳情" : "展開會議詳情"}
+                    >
+                      {meetingDetail?.meeting.id === meeting.id ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                    </button>
+                    {editActions("meeting", meeting)}
+                  </div>
+                </article>
+                {meetingDetail?.meeting.id === meeting.id ? (
+                  <div className="meeting-detail">
+                    {meetingDetailLoading ? (
+                      <p className="empty">載入中...</p>
+                    ) : (
+                      <>
+                        {meetingDetail.meeting.notes ? (
+                          <section className="meeting-detail-section">
+                            <h4>出席與背景</h4>
+                            <pre className="meeting-notes">{meetingDetail.meeting.notes}</pre>
+                          </section>
+                        ) : null}
+                        {meetingDetail.meeting.summary ? (
+                          <section className="meeting-detail-section">
+                            <h4>摘要</h4>
+                            <p>{meetingDetail.meeting.summary}</p>
+                          </section>
+                        ) : null}
+                        {meetingDetail.decisions.length > 0 ? (
+                          <section className="meeting-detail-section">
+                            <h4>會議決議（{meetingDetail.decisions.length} 項）</h4>
+                            <ol className="meeting-decisions">
+                              {meetingDetail.decisions.map((d, i) => (
+                                <li key={d.id}>
+                                  <span className="decision-index">{i + 1}</span>
+                                  <span>{d.decision}</span>
+                                </li>
+                              ))}
+                            </ol>
+                          </section>
+                        ) : null}
+                        {meetingDetail.actionItems.length > 0 ? (
+                          <section className="meeting-detail-section">
+                            <h4>執行事項（{meetingDetail.actionItems.length} 項）</h4>
+                            <div className="action-items-table">
+                              <div className="action-items-table__head">
+                                <span>事項</span>
+                                <span>負責人</span>
+                                <span>期限</span>
+                              </div>
+                              {meetingDetail.actionItems.map((item) => (
+                                <div className="action-items-table__row" key={item.id}>
+                                  <span>{item.title}</span>
+                                  <span>{item.owner_names ?? "—"}</span>
+                                  <span>{item.due_date ?? "—"}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </section>
+                        ) : null}
+                        {meetingDetail.decisions.length === 0 && meetingDetail.actionItems.length === 0 ? (
+                          <p className="empty">此會議尚未記錄決議或執行事項。</p>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                ) : null}
+              </div>
             ))}
             {meetings.length === 0 && loadState !== "loading" ? <p className="empty">目前沒有會議紀錄。</p> : null}
           </div>

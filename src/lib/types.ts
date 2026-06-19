@@ -59,6 +59,19 @@ export interface ActionItemSummary {
   collaborator_names: string | null;
 }
 
+export interface MeetingDecision {
+  id: string;
+  meeting_id: string;
+  decision: string;
+  created_at: string;
+}
+
+export interface MeetingDetail {
+  meeting: MeetingSummary;
+  decisions: MeetingDecision[];
+  actionItems: ActionItemSummary[];
+}
+
 export interface RequirementSummary {
   id: string;
   project_id: string | null;
