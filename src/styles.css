@@ -73,9 +73,12 @@ button, input, select, textarea { font: inherit; }
 }
 
 .rotary-logo {
-  width: 56px;
   height: 56px;
+  width: auto;
   flex-shrink: 0;
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 6px 10px;
 }
 
 .eyebrow {

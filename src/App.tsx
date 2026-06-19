@@ -609,7 +609,7 @@ function App() {
     return (
       <main className="shell shell--center">
         <section className="auth-panel">
-          <img src="/rotary-wheel.svg" alt="扶輪標誌" className="rotary-logo" />
+          <img src="/rotary-logo.png" alt="扶輪標誌" className="rotary-logo" />
           <h1>{APP_NAME}</h1>
           <p>請設定 VITE_SUPABASE_URL 與 VITE_SUPABASE_PUBLISHABLE_KEY 以連線到系統。</p>
         </section>
@@ -621,7 +621,7 @@ function App() {
     return (
       <main className="shell shell--center">
         <form className="auth-panel" onSubmit={signIn}>
-          <img src="/rotary-wheel.svg" alt="扶輪標誌" className="rotary-logo" />
+          <img src="/rotary-logo.png" alt="扶輪標誌" className="rotary-logo" />
           <h1>{APP_NAME}</h1>
           <label>
             電子郵件
@@ -678,7 +678,7 @@ function App() {
     <main className="shell">
       <header className="topbar">
         <div className="topbar-brand">
-          <img src="/rotary-wheel.svg" alt="扶輪標誌" className="rotary-logo" />
+          <img src="/rotary-logo.png" alt="扶輪標誌" className="rotary-logo" />
           <div>
             <p className="eyebrow">國際扶輪 3481 地區 AI 委員會</p>
             <h1>{APP_NAME}</h1>
