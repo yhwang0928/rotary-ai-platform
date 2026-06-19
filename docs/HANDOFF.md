@@ -13,6 +13,17 @@ Last updated: 2026-06-19
 - Added private helper functions for project membership and role checks.
 - Added task update audit trigger writing to `activity_logs`.
 - Added seed SQL for the seven initial Rotary AI work groups.
+- Fixed the initial migration by renaming the `notifications.window` column to `notifications.reminder_window`.
+- Initialized Git and pushed the first project foundation to GitHub.
+
+## Current Project State
+
+- Local repo: `/Users/yikaihuang/Desktop/Codex/rotary-ai-platform`
+- GitHub repo: `https://github.com/yhwang0928/rotary-ai-platform.git`
+- Supabase project URL: `https://ffbaaqrvlcrxfdxyfdzs.supabase.co`
+- Local dev URL: `http://localhost:5173/`
+- Supabase migration and seed were applied manually through Supabase SQL Editor.
+- `.env.local`, `node_modules`, and `dist` are intentionally ignored and not pushed to GitHub.
 
 ## How To Verify
 
@@ -45,9 +56,10 @@ Last updated: 2026-06-19
 ## Remaining Risks
 
 - Supabase CLI is not installed in this environment, so the migration was created manually instead of through `supabase migration new`.
-- The migration has not been applied to a live Supabase project in this session.
 - RLS should be tested with real users for each role before broader feature work.
 - Google Calendar/Meet OAuth, email reminders, and Cloudflare production deployment still need separate implementation and verification.
+- The first admin user still needs to be created in Supabase Auth and assigned `profiles.role = 'admin'`.
+- Project membership still needs to be assigned before non-admin users can see project data.
 
 ## Verification Completed
 
@@ -55,3 +67,8 @@ Last updated: 2026-06-19
 - `pnpm lint`
 - `pnpm build`
 - `pnpm dev` at `http://localhost:5173/`
+- Initial GitHub push to `origin/main`
+
+## Next Recommended Step
+
+Create the first Supabase Auth user, set that user's `profiles.role` to `admin`, then log in at `http://localhost:5173/` to verify that the seven seeded projects load from Supabase.
