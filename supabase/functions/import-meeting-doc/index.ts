@@ -56,17 +56,6 @@ function cleanText(value: string) {
     .trim();
 }
 
-function deriveSummary(text: string) {
-  const lines = text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const summaryHeadingIndex = lines.findIndex((line) => /^(摘要|會議摘要|summary)$/i.test(line));
-  const sourceLines = summaryHeadingIndex >= 0 ? lines.slice(summaryHeadingIndex + 1) : lines.slice(0, 4);
-  const summary = sourceLines.join(" ").slice(0, 240).trim();
-  return summary || null;
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -130,7 +119,7 @@ Deno.serve(async (req) => {
       .from("meetings")
       .update({
         notes,
-        summary: deriveSummary(notes),
+        summary: null,
         notes_doc_url: url,
       })
       .eq("id", meetingId)

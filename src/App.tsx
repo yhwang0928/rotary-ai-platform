@@ -148,7 +148,7 @@ function App() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [kpiModal, setKpiModal] = useState<"total" | "due7" | "overdue" | "blocked" | null>(null);
   const [isAddingMeeting, setIsAddingMeeting] = useState(false);
-  const [newMeeting, setNewMeeting] = useState({ title: "", meeting_date: "", summary: "", notes_doc_url: "" });
+  const [newMeeting, setNewMeeting] = useState({ title: "", meeting_date: "", notes: "", notes_doc_url: "" });
   const [isAddingAnnouncement, setIsAddingAnnouncement] = useState(false);
   const [newAnnouncement, setNewAnnouncement] = useState({ title: "", body: "" });
   const [importingMeetingId, setImportingMeetingId] = useState<string | null>(null);
@@ -366,14 +366,15 @@ function App() {
       .insert({
         title: newMeeting.title,
         meeting_date: newMeeting.meeting_date,
-        summary: newMeeting.summary || null,
+        summary: null,
+        notes: newMeeting.notes || null,
         notes_doc_url: newMeeting.notes_doc_url || null,
       })
       .select("id,project_id,title,meeting_date,summary,notes,google_meet_url,notes_doc_url")
       .single();
     if (error) { setSaveMessage("新增失敗。"); return; }
     setMeetings((prev) => [data as MeetingSummary, ...prev]);
-    setNewMeeting({ title: "", meeting_date: "", summary: "", notes_doc_url: "" });
+    setNewMeeting({ title: "", meeting_date: "", notes: "", notes_doc_url: "" });
     setIsAddingMeeting(false);
     setSaveMessage("已新增會議記錄。");
   }
@@ -988,7 +989,7 @@ function App() {
                   <div>
                     <strong>{meeting.title}</strong>
                     <span>{meeting.meeting_date}</span>
-                    {meeting.summary ? <p>{meeting.summary}</p> : null}
+                    {meeting.notes ? <pre className="meeting-notes">{meeting.notes}</pre> : null}
                   </div>
                   <div className="row-actions">
                     {meeting.google_meet_url ? (
@@ -1300,12 +1301,11 @@ function App() {
                   />
                 </label>
                 <label style={{ gridColumn: "1 / -1" }}>
-                  摘要（選填）
-                  <input
-                    type="text"
-                    value={newMeeting.summary}
-                    onChange={(e) => setNewMeeting((v) => ({ ...v, summary: e.target.value }))}
-                    placeholder="會議重點摘要"
+                  完整會議內容（選填）
+                  <textarea
+                    value={newMeeting.notes}
+                    onChange={(e) => setNewMeeting((v) => ({ ...v, notes: e.target.value }))}
+                    placeholder="輸入完整會議記錄，或貼上 Google Doc 連結後匯入"
                   />
                 </label>
                 <label style={{ gridColumn: "1 / -1" }}>
@@ -1320,7 +1320,7 @@ function App() {
               </div>
               <div className="form-actions">
                 <button type="button" onClick={addMeeting}>新增</button>
-                <button type="button" onClick={() => { setIsAddingMeeting(false); setNewMeeting({ title: "", meeting_date: "", summary: "", notes_doc_url: "" }); }}>取消</button>
+                <button type="button" onClick={() => { setIsAddingMeeting(false); setNewMeeting({ title: "", meeting_date: "", notes: "", notes_doc_url: "" }); }}>取消</button>
               </div>
             </div>
           ) : null}
@@ -1340,7 +1340,7 @@ function App() {
                       <div className="meeting-row-meta">
                         <span className="meeting-title">{meeting.title}</span>
                         <span className="meeting-date">{meeting.meeting_date}</span>
-                        {meeting.summary && !isOpen ? <p className="meeting-summary">{meeting.summary}</p> : null}
+                        {meeting.notes && !isOpen ? <pre className="meeting-notes meeting-notes--preview">{meeting.notes}</pre> : null}
                       </div>
                       <div className="row-actions">
                         {meeting.google_meet_url ? (
@@ -1395,21 +1395,14 @@ function App() {
                                 {editInput("meeting_date", "會議日期", "date")}
                                 {editInput("google_meet_url", "Google Meet 連結")}
                                 {editInput("notes_doc_url", "Google Doc 連結")}
-                                {editTextarea("summary", "摘要")}
-                                {editTextarea("notes", "出席與背景")}
+                                {editTextarea("notes", "完整會議內容")}
                               </div>
                             </section>
                           ) : null}
                           {meetingDetail!.meeting.notes ? (
                             <section className="meeting-detail-section">
-                              <h4>出席與背景</h4>
+                              <h4>完整會議內容</h4>
                               <pre className="meeting-notes">{meetingDetail!.meeting.notes}</pre>
-                            </section>
-                          ) : null}
-                          {meetingDetail!.meeting.summary ? (
-                            <section className="meeting-detail-section">
-                              <h4>摘要</h4>
-                              <p>{meetingDetail!.meeting.summary}</p>
                             </section>
                           ) : null}
                           {meetingDetail!.decisions.length > 0 ? (
