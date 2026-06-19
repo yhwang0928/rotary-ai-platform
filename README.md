@@ -1,49 +1,49 @@
-# Rotary AI Platform
+# 3481 Rotary AI專案管理平台
 
-Internal project management platform for Rotary District 3481 AI committee work.
+國際扶輪 3481 地區 AI 委員會內部專案管理平台。
 
-## Stack
+## 技術架構
 
 - Vite + React + TypeScript
 - Supabase Auth, Postgres, RLS
 - Cloudflare Pages
 
-## Local Setup
+## 本機設定
 
-1. Install dependencies:
+1. 安裝套件：
 
    ```bash
    pnpm install
    ```
 
-2. Copy environment variables:
+2. 複製環境變數：
 
    ```bash
    cp .env.example .env.local
    ```
 
-3. Fill in:
+3. 填入：
 
    ```text
    VITE_SUPABASE_URL
    VITE_SUPABASE_PUBLISHABLE_KEY
    ```
 
-4. Apply Supabase SQL in order:
+4. 依序執行 Supabase SQL：
 
    ```text
    supabase/migrations/202606190001_initial_foundation.sql
    supabase/seed/initial_projects.sql
    ```
 
-5. Start the app:
+5. 啟動系統：
 
    ```bash
    pnpm dev
    ```
 
-## Current Scope
+## 目前範圍
 
-This foundation includes the React app shell, Supabase client, login flow, dashboard read model, core schema, RLS policies, task audit trigger, and initial Rotary AI work groups.
+目前已包含 React 應用程式外殼、Supabase client、登入流程、儀表板讀取模型、核心資料表、RLS 政策、任務稽核觸發器，以及初始 Rotary AI 工作群組。
 
-Google Calendar/Meet, email reminders, task inline editing, Gantt, and Drive indexing are planned next milestones.
+Google Calendar/Meet、電子郵件提醒、任務表格內編輯、甘特圖與 Google Drive 索引是後續里程碑。

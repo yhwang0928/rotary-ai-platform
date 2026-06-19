@@ -13,6 +13,39 @@ import "./styles.css";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
+const APP_NAME = "3481 Rotary AI專案管理平台";
+
+const taskStatusLabels: Record<TaskSummary["status"], string> = {
+  backlog: "待排程",
+  todo: "待處理",
+  doing: "進行中",
+  review: "審核中",
+  done: "已完成",
+  blocked: "受阻",
+  cancelled: "已取消",
+};
+
+const projectStatusLabels: Record<string, string> = {
+  active: "進行中",
+  paused: "暫停",
+  completed: "已完成",
+  archived: "已封存",
+};
+
+const requirementStatusLabels: Record<string, string> = {
+  draft: "草稿",
+  reviewing: "審核中",
+  approved: "已核准",
+  in_dev: "開發中",
+  testing: "測試中",
+  released: "已發布",
+  rejected: "已退回",
+};
+
+function labelFromMap(labels: Record<string, string>, value: string) {
+  return labels[value] ?? value;
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [email, setEmail] = useState("");
@@ -118,9 +151,9 @@ function App() {
     event.preventDefault();
     if (!supabase) return;
 
-    setAuthMessage("Signing in...");
+    setAuthMessage("登入中...");
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setAuthMessage(error ? error.message : "");
+    setAuthMessage(error ? "登入失敗，請確認電子郵件與密碼。" : "");
   }
 
   async function signOut() {
@@ -136,8 +169,8 @@ function App() {
     return (
       <main className="shell shell--center">
         <section className="auth-panel">
-          <h1>Rotary AI Platform</h1>
-          <p>Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` to connect the app.</p>
+          <h1>{APP_NAME}</h1>
+          <p>請設定 `VITE_SUPABASE_URL` 與 `VITE_SUPABASE_PUBLISHABLE_KEY` 以連線到系統。</p>
         </section>
       </main>
     );
@@ -147,9 +180,9 @@ function App() {
     return (
       <main className="shell shell--center">
         <form className="auth-panel" onSubmit={signIn}>
-          <h1>Rotary AI Platform</h1>
+          <h1>{APP_NAME}</h1>
           <label>
-            Email
+            電子郵件
             <input
               type="email"
               value={email}
@@ -159,7 +192,7 @@ function App() {
             />
           </label>
           <label>
-            Password
+            密碼
             <input
               type="password"
               value={password}
@@ -168,7 +201,7 @@ function App() {
               required
             />
           </label>
-          <button type="submit">Sign in</button>
+          <button type="submit">登入</button>
           {authMessage ? <p className="form-message">{authMessage}</p> : null}
         </form>
       </main>
@@ -179,73 +212,73 @@ function App() {
     <main className="shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">District 3481</p>
-          <h1>Rotary AI Platform</h1>
+          <p className="eyebrow">國際扶輪 3481 地區</p>
+          <h1>{APP_NAME}</h1>
         </div>
-        <button className="icon-button" type="button" onClick={signOut} title="Sign out">
+        <button className="icon-button" type="button" onClick={signOut} title="登出" aria-label="登出">
           <LogOut size={18} />
         </button>
       </header>
 
       <section className="stats-grid">
-        <StatCard label="Active tasks" value={taskStats.total} />
-        <StatCard label="Due in 7 days" value={taskStats.due7} tone="warn" />
-        <StatCard label="Overdue" value={taskStats.overdue} tone="danger" />
-        <StatCard label="Blocked" value={taskStats.blocked} tone="neutral" />
+        <StatCard label="進行中任務" value={taskStats.total} />
+        <StatCard label="七天內到期" value={taskStats.due7} tone="warn" />
+        <StatCard label="已逾期" value={taskStats.overdue} tone="danger" />
+        <StatCard label="受阻任務" value={taskStats.blocked} tone="neutral" />
       </section>
 
       {loadState === "error" ? (
-        <section className="notice">Data could not be loaded. Check Supabase grants, RLS policies, and project membership.</section>
+        <section className="notice">資料無法載入，請確認 Supabase 權限、RLS 政策與專案成員設定。</section>
       ) : null}
 
       <section className="content-grid">
         <div className="panel">
           <div className="panel-heading">
             <FolderKanban size={18} />
-            <h2>Projects</h2>
+            <h2>專案列表</h2>
           </div>
           <div className="list">
             {projects.map((project) => (
               <article className="list-row" key={project.id}>
                 <div>
                   <strong>{project.name}</strong>
-                  <span>{project.status}</span>
+                  <span>{labelFromMap(projectStatusLabels, project.status)}</span>
                 </div>
                 {project.google_drive_folder_url ? (
-                  <a href={project.google_drive_folder_url} target="_blank" rel="noreferrer" title="Open Drive folder">
+                  <a href={project.google_drive_folder_url} target="_blank" rel="noreferrer" title="開啟雲端硬碟資料夾">
                     <ExternalLink size={16} />
                   </a>
                 ) : null}
               </article>
             ))}
-            {projects.length === 0 && loadState !== "loading" ? <p className="empty">No visible projects.</p> : null}
+            {projects.length === 0 && loadState !== "loading" ? <p className="empty">目前沒有可查看的專案。</p> : null}
           </div>
         </div>
 
         <div className="panel">
           <div className="panel-heading">
             <CalendarDays size={18} />
-            <h2>Upcoming Work</h2>
+            <h2>近期工作</h2>
           </div>
           <div className="task-table" role="table">
             <div className="task-table__head" role="row">
-              <span>Task</span>
-              <span>Status</span>
-              <span>Due</span>
+              <span>任務</span>
+              <span>狀態</span>
+              <span>期限</span>
             </div>
             {tasks.slice(0, 8).map((task) => (
               <div className="task-table__row" role="row" key={task.id}>
                 <strong>{task.title}</strong>
-                <span>{task.status}</span>
-                <span>{task.due_date ?? "No date"}</span>
+                <span>{taskStatusLabels[task.status]}</span>
+                <span>{task.due_date ?? "未設定"}</span>
               </div>
             ))}
-            {tasks.length === 0 && loadState !== "loading" ? <p className="empty">No active tasks.</p> : null}
+            {tasks.length === 0 && loadState !== "loading" ? <p className="empty">目前沒有進行中的任務。</p> : null}
           </div>
         </div>
 
         <div className="panel">
-          <h2>Recent Meetings</h2>
+          <h2>最近會議</h2>
           <div className="list">
             {meetings.map((meeting) => (
               <article className="list-row" key={meeting.id}>
@@ -254,28 +287,28 @@ function App() {
                   <span>{meeting.meeting_date}</span>
                 </div>
                 {meeting.google_meet_url ? (
-                  <a href={meeting.google_meet_url} target="_blank" rel="noreferrer" title="Open Meet">
+                  <a href={meeting.google_meet_url} target="_blank" rel="noreferrer" title="開啟 Google Meet">
                     <ExternalLink size={16} />
                   </a>
                 ) : null}
               </article>
             ))}
-            {meetings.length === 0 && loadState !== "loading" ? <p className="empty">No meeting records.</p> : null}
+            {meetings.length === 0 && loadState !== "loading" ? <p className="empty">目前沒有會議紀錄。</p> : null}
           </div>
         </div>
 
         <div className="panel">
-          <h2>Updated Requirements</h2>
+          <h2>最近更新需求</h2>
           <div className="list">
             {requirements.map((requirement) => (
               <article className="list-row" key={requirement.id}>
                 <div>
                   <strong>{requirement.title}</strong>
-                  <span>{requirement.module} · {requirement.status}</span>
+                  <span>{requirement.module} · {labelFromMap(requirementStatusLabels, requirement.status)}</span>
                 </div>
               </article>
             ))}
-            {requirements.length === 0 && loadState !== "loading" ? <p className="empty">No requirements yet.</p> : null}
+            {requirements.length === 0 && loadState !== "loading" ? <p className="empty">目前沒有需求紀錄。</p> : null}
           </div>
         </div>
       </section>
