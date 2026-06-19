@@ -130,6 +130,9 @@ function App() {
   const [meetingDetailLoading, setMeetingDetailLoading] = useState(false);
   const [isAddingProject, setIsAddingProject] = useState(false);
   const [newProject, setNewProject] = useState<NewProjectState>(emptyNewProject);
+  const [kpiModal, setKpiModal] = useState<"total" | "due7" | "overdue" | "blocked" | null>(null);
+  const [isAddingMeeting, setIsAddingMeeting] = useState(false);
+  const [newMeeting, setNewMeeting] = useState({ title: "", meeting_date: "", summary: "" });
 
   useEffect(() => {
     if (!supabase) return;
@@ -341,6 +344,31 @@ function App() {
       decisions: (decisionsResult.data ?? []) as MeetingDecision[],
       actionItems: (actionItemsResult.data ?? []) as ActionItemSummary[],
     });
+  }
+
+  async function addMeeting() {
+    if (!supabase || !newMeeting.title || !newMeeting.meeting_date) return;
+    setSaveMessage("新增中...");
+    const { data, error } = await supabase
+      .from("meetings")
+      .insert({ title: newMeeting.title, meeting_date: newMeeting.meeting_date, summary: newMeeting.summary || null })
+      .select("id,project_id,title,meeting_date,summary,notes,google_meet_url")
+      .single();
+    if (error) { setSaveMessage("新增失敗。"); return; }
+    setMeetings((prev) => [data as MeetingSummary, ...prev]);
+    setNewMeeting({ title: "", meeting_date: "", summary: "" });
+    setIsAddingMeeting(false);
+    setSaveMessage("已新增會議記錄。");
+  }
+
+  async function deleteMeeting(id: string) {
+    if (!supabase) return;
+    if (!window.confirm("確定要刪除此會議記錄？此操作無法復原。")) return;
+    const { error } = await supabase.from("meetings").delete().eq("id", id);
+    if (error) { setSaveMessage("刪除失敗。"); return; }
+    setMeetings((prev) => prev.filter((m) => m.id !== id));
+    if (meetingDetail?.meeting.id === id) setMeetingDetail(null);
+    setSaveMessage("已刪除。");
   }
 
   function startEdit(kind: EditKind, item: { id: string } & object) {
@@ -581,8 +609,9 @@ function App() {
     return (
       <main className="shell shell--center">
         <section className="auth-panel">
+          <img src="/rotary-wheel.svg" alt="扶輪標誌" className="rotary-logo" />
           <h1>{APP_NAME}</h1>
-          <p>請設定 `VITE_SUPABASE_URL` 與 `VITE_SUPABASE_PUBLISHABLE_KEY` 以連線到系統。</p>
+          <p>請設定 VITE_SUPABASE_URL 與 VITE_SUPABASE_PUBLISHABLE_KEY 以連線到系統。</p>
         </section>
       </main>
     );
@@ -592,6 +621,7 @@ function App() {
     return (
       <main className="shell shell--center">
         <form className="auth-panel" onSubmit={signIn}>
+          <img src="/rotary-wheel.svg" alt="扶輪標誌" className="rotary-logo" />
           <h1>{APP_NAME}</h1>
           <label>
             電子郵件
@@ -620,23 +650,84 @@ function App() {
     );
   }
 
+  const kpiTasks: Record<string, TaskSummary[]> = {
+    total: tasks,
+    due7: tasks.filter((t) => {
+      if (!t.due_date || t.status === "done" || t.status === "cancelled") return false;
+      const today = new Date(); today.setHours(0,0,0,0);
+      const due = new Date(`${t.due_date}T00:00:00`);
+      const d7 = new Date(today); d7.setDate(d7.getDate() + 7);
+      return due >= today && due <= d7;
+    }),
+    overdue: tasks.filter((t) => {
+      if (!t.due_date || t.status === "done" || t.status === "cancelled") return false;
+      const today = new Date(); today.setHours(0,0,0,0);
+      return new Date(`${t.due_date}T00:00:00`) < today;
+    }),
+    blocked: tasks.filter((t) => t.status === "blocked"),
+  };
+
+  const kpiLabels: Record<string, string> = {
+    total: "全部進行中任務",
+    due7: "七天內到期任務",
+    overdue: "逾期任務",
+    blocked: "受阻任務",
+  };
+
   return (
     <main className="shell">
       <header className="topbar">
-        <div>
-          <p className="eyebrow">國際扶輪 3481 地區</p>
-          <h1>{APP_NAME}</h1>
+        <div className="topbar-brand">
+          <img src="/rotary-wheel.svg" alt="扶輪標誌" className="rotary-logo" />
+          <div>
+            <p className="eyebrow">國際扶輪 3481 地區 AI 委員會</p>
+            <h1>{APP_NAME}</h1>
+          </div>
         </div>
         <button className="icon-button" type="button" onClick={signOut} title="登出" aria-label="登出">
           <LogOut size={18} />
         </button>
       </header>
 
+      {kpiModal ? (
+        <div className="kpi-modal-backdrop" onClick={() => setKpiModal(null)}>
+          <div className="kpi-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="kpi-modal-header">
+              <h3>{kpiLabels[kpiModal]}（{kpiTasks[kpiModal].length} 項）</h3>
+              <button className="icon-button" type="button" onClick={() => setKpiModal(null)} aria-label="關閉">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="kpi-modal-body">
+              {kpiTasks[kpiModal].length === 0 ? (
+                <p className="empty">目前沒有符合條件的任務。</p>
+              ) : (
+                <>
+                  <div className="kpi-task-row" style={{ color: "var(--gold)", fontWeight: 700, fontSize: "0.75rem", letterSpacing: "0.05em" }}>
+                    <span>任務</span><span>負責人</span><span>期限</span>
+                  </div>
+                  {kpiTasks[kpiModal].map((t) => (
+                    <div className="kpi-task-row" key={t.id}>
+                      <div>
+                        <strong>{t.title}</strong>
+                        <span>{taskStatusLabels[t.status]}</span>
+                      </div>
+                      <span>{t.owner_names ?? "—"}</span>
+                      <span>{t.due_date ?? "—"}</span>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <section className="stats-grid">
-        <StatCard label="進行中任務" value={taskStats.total} />
-        <StatCard label="七天內到期" value={taskStats.due7} tone="warn" />
-        <StatCard label="已逾期" value={taskStats.overdue} tone="danger" />
-        <StatCard label="受阻任務" value={taskStats.blocked} tone="neutral" />
+        <StatCard label="進行中任務" value={taskStats.total} onClick={() => setKpiModal("total")} />
+        <StatCard label="七天內到期" value={taskStats.due7} tone="warn" onClick={() => setKpiModal("due7")} />
+        <StatCard label="已逾期" value={taskStats.overdue} tone="danger" onClick={() => setKpiModal("overdue")} />
+        <StatCard label="受阻任務" value={taskStats.blocked} tone="neutral" onClick={() => setKpiModal("blocked")} />
       </section>
 
       {loadState === "error" ? (
@@ -677,31 +768,15 @@ function App() {
                   const width = `${Math.max((row.durationDays / projectGantt.totalDays) * 100, 4)}%`;
                   const startText = row.project.start_date ?? formatMonthDay(row.start);
                   const endText = row.project.expected_end_date ?? formatMonthDay(row.end);
-                  const barText = row.lastTask ? `最後任務：${row.lastTask.title}` : "尚未建立任務";
-
                   return (
                     <div className="gantt-row" key={row.project.id}>
                       <div className="gantt-project-meta">
-                        {isEditing("project", row.project.id) ? (
-                          <div className="edit-grid">
-                            {editInput("name", "專案")}
-                            {editSelect("status", "狀態", projectStatusOptions)}
-                            {editInput("start_date", "開始時間", "date")}
-                            {editInput("expected_end_date", "期望結束時間", "date")}
-                          </div>
-                        ) : (
-                          <>
-                            <strong>{row.project.name}</strong>
-                            <span>{startText} - {endText}</span>
-                            <span>{row.doneCount}/{row.taskCount} 完成 · {row.progress}%</span>
-                          </>
-                        )}
-                        {editActions("project", row.project)}
+                        <strong>{row.project.name}</strong>
+                        <span>{startText} — {endText}</span>
                       </div>
                       <div className="gantt-track">
-                        <div className="gantt-bar gantt-bar--project" style={{ left, width }} title={barText}>
-                          <span>{barText}</span>
-                          <i style={{ width: `${row.progress}%` }} />
+                        <div className="gantt-bar gantt-bar--project" style={{ left, width }} title={`${row.project.name} ${startText}–${endText}`}>
+                          <span>{startText} — {endText}</span>
                         </div>
                       </div>
                     </div>
@@ -837,106 +912,148 @@ function App() {
           </div>
         </div>
 
-        <div className="panel">
-          <h2>最近會議</h2>
+        <div className="panel panel--wide">
+          <div className="panel-heading">
+            <CalendarDays size={18} />
+            <h2>會議記錄</h2>
+            <button className="btn-add panel-action" type="button" onClick={() => setIsAddingMeeting((v) => !v)}>
+              <Plus size={14} /> 新增會議記錄
+            </button>
+          </div>
+
+          {isAddingMeeting ? (
+            <div className="add-meeting-form">
+              <div className="edit-grid">
+                <label>
+                  會議標題
+                  <input
+                    type="text"
+                    value={newMeeting.title}
+                    onChange={(e) => setNewMeeting((v) => ({ ...v, title: e.target.value }))}
+                    placeholder="例：AI委員會第三次技術會議"
+                  />
+                </label>
+                <label>
+                  會議日期
+                  <input
+                    type="date"
+                    value={newMeeting.meeting_date}
+                    onChange={(e) => setNewMeeting((v) => ({ ...v, meeting_date: e.target.value }))}
+                  />
+                </label>
+                <label style={{ gridColumn: "1 / -1" }}>
+                  摘要（選填）
+                  <input
+                    type="text"
+                    value={newMeeting.summary}
+                    onChange={(e) => setNewMeeting((v) => ({ ...v, summary: e.target.value }))}
+                    placeholder="會議重點摘要"
+                  />
+                </label>
+              </div>
+              <div className="form-actions">
+                <button type="button" onClick={addMeeting}>新增</button>
+                <button type="button" onClick={() => { setIsAddingMeeting(false); setNewMeeting({ title: "", meeting_date: "", summary: "" }); }}>取消</button>
+              </div>
+            </div>
+          ) : null}
+
           <div className="list">
-            {meetings.map((meeting) => (
-              <div className="meeting-item" key={meeting.id}>
-                <article className="list-row">
-                  <div>
-                    {isEditing("meeting", meeting.id) ? (
-                      <div className="edit-grid">
-                        {editInput("title", "會議標題")}
-                        {editInput("meeting_date", "日期", "date")}
-                        {editTextarea("summary", "摘要")}
-                        {editTextarea("notes", "備註")}
-                        {editInput("google_meet_url", "Google Meet 連結")}
-                      </div>
-                    ) : (
-                      <>
-                        <strong>{meeting.title}</strong>
-                        <span>{meeting.meeting_date}</span>
-                        {meeting.summary ? <p>{meeting.summary}</p> : null}
-                      </>
-                    )}
-                  </div>
-                  <div className="row-actions">
-                    {meeting.google_meet_url && !isEditing("meeting", meeting.id) ? (
-                      <a href={meeting.google_meet_url} target="_blank" rel="noreferrer" title="開啟 Google Meet">
-                        <ExternalLink size={16} />
-                      </a>
-                    ) : null}
+            {meetings.map((meeting) => {
+              const isOpen = meetingDetail?.meeting.id === meeting.id;
+              return (
+                <div className="list-row--meeting" key={meeting.id}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: "12px", padding: "12px 0" }}>
                     <button
-                      className="icon-button"
+                      className="meeting-row-header"
                       type="button"
                       onClick={() => openMeetingDetail(meeting)}
-                      title={meetingDetail?.meeting.id === meeting.id ? "收合會議詳情" : "展開會議詳情"}
-                      aria-label={meetingDetail?.meeting.id === meeting.id ? "收合會議詳情" : "展開會議詳情"}
+                      aria-expanded={isOpen}
                     >
-                      {meetingDetail?.meeting.id === meeting.id ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                      <div className="meeting-row-meta">
+                        <span className="meeting-title">{meeting.title}</span>
+                        <span className="meeting-date">{meeting.meeting_date}</span>
+                        {meeting.summary && !isOpen ? <p className="meeting-summary">{meeting.summary}</p> : null}
+                      </div>
+                      <div className="row-actions">
+                        {meeting.google_meet_url ? (
+                          <a href={meeting.google_meet_url} target="_blank" rel="noreferrer" title="開啟 Google Meet" onClick={(e) => e.stopPropagation()}>
+                            <ExternalLink size={16} />
+                          </a>
+                        ) : null}
+                        {isOpen ? <ChevronUp size={16} style={{ color: "var(--gold)" }} /> : <ChevronDown size={16} style={{ color: "var(--text-muted)" }} />}
+                      </div>
                     </button>
-                    {editActions("meeting", meeting)}
+                    <button
+                      className="icon-button icon-button--danger"
+                      type="button"
+                      onClick={() => deleteMeeting(meeting.id)}
+                      title="刪除此會議記錄"
+                      aria-label="刪除"
+                      style={{ flexShrink: 0, marginTop: "2px" }}
+                    >
+                      <X size={14} />
+                    </button>
                   </div>
-                </article>
-                {meetingDetail?.meeting.id === meeting.id ? (
-                  <div className="meeting-detail">
-                    {meetingDetailLoading ? (
-                      <p className="empty">載入中...</p>
-                    ) : (
-                      <>
-                        {meetingDetail.meeting.notes ? (
-                          <section className="meeting-detail-section">
-                            <h4>出席與背景</h4>
-                            <pre className="meeting-notes">{meetingDetail.meeting.notes}</pre>
-                          </section>
-                        ) : null}
-                        {meetingDetail.meeting.summary ? (
-                          <section className="meeting-detail-section">
-                            <h4>摘要</h4>
-                            <p>{meetingDetail.meeting.summary}</p>
-                          </section>
-                        ) : null}
-                        {meetingDetail.decisions.length > 0 ? (
-                          <section className="meeting-detail-section">
-                            <h4>會議決議（{meetingDetail.decisions.length} 項）</h4>
-                            <ol className="meeting-decisions">
-                              {meetingDetail.decisions.map((d, i) => (
-                                <li key={d.id}>
-                                  <span className="decision-index">{i + 1}</span>
-                                  <span>{d.decision}</span>
-                                </li>
-                              ))}
-                            </ol>
-                          </section>
-                        ) : null}
-                        {meetingDetail.actionItems.length > 0 ? (
-                          <section className="meeting-detail-section">
-                            <h4>執行事項（{meetingDetail.actionItems.length} 項）</h4>
-                            <div className="action-items-table">
-                              <div className="action-items-table__head">
-                                <span>事項</span>
-                                <span>負責人</span>
-                                <span>期限</span>
-                              </div>
-                              {meetingDetail.actionItems.map((item) => (
-                                <div className="action-items-table__row" key={item.id}>
-                                  <span>{item.title}</span>
-                                  <span>{item.owner_names ?? "—"}</span>
-                                  <span>{item.due_date ?? "—"}</span>
+
+                  {isOpen ? (
+                    <div className="meeting-detail">
+                      {meetingDetailLoading ? (
+                        <p className="empty">載入中...</p>
+                      ) : (
+                        <>
+                          {meetingDetail!.meeting.notes ? (
+                            <section className="meeting-detail-section">
+                              <h4>出席與背景</h4>
+                              <pre className="meeting-notes">{meetingDetail!.meeting.notes}</pre>
+                            </section>
+                          ) : null}
+                          {meetingDetail!.meeting.summary ? (
+                            <section className="meeting-detail-section">
+                              <h4>摘要</h4>
+                              <p>{meetingDetail!.meeting.summary}</p>
+                            </section>
+                          ) : null}
+                          {meetingDetail!.decisions.length > 0 ? (
+                            <section className="meeting-detail-section">
+                              <h4>會議決議（{meetingDetail!.decisions.length} 項）</h4>
+                              <ol className="meeting-decisions">
+                                {meetingDetail!.decisions.map((d, i) => (
+                                  <li key={d.id}>
+                                    <span className="decision-index">{i + 1}</span>
+                                    <span>{d.decision}</span>
+                                  </li>
+                                ))}
+                              </ol>
+                            </section>
+                          ) : null}
+                          {meetingDetail!.actionItems.length > 0 ? (
+                            <section className="meeting-detail-section">
+                              <h4>執行事項（{meetingDetail!.actionItems.length} 項）</h4>
+                              <div className="action-items-table">
+                                <div className="action-items-table__head">
+                                  <span>事項</span><span>負責人</span><span>期限</span>
                                 </div>
-                              ))}
-                            </div>
-                          </section>
-                        ) : null}
-                        {meetingDetail.decisions.length === 0 && meetingDetail.actionItems.length === 0 ? (
-                          <p className="empty">此會議尚未記錄決議或執行事項。</p>
-                        ) : null}
-                      </>
-                    )}
-                  </div>
-                ) : null}
-              </div>
-            ))}
+                                {meetingDetail!.actionItems.map((item) => (
+                                  <div className="action-items-table__row" key={item.id}>
+                                    <span>{item.title}</span>
+                                    <span>{item.owner_names ?? "—"}</span>
+                                    <span>{item.due_date ?? "—"}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </section>
+                          ) : null}
+                          {meetingDetail!.decisions.length === 0 && meetingDetail!.actionItems.length === 0 ? (
+                            <p className="empty">此會議尚未記錄決議或執行事項。</p>
+                          ) : null}
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
             {meetings.length === 0 && loadState !== "loading" ? <p className="empty">目前沒有會議紀錄。</p> : null}
           </div>
         </div>
