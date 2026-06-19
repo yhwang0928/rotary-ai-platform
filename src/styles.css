@@ -1047,7 +1047,7 @@ h4 {
   font-weight: 700;
 }
 
-.gantt-bar--project { background: #f3f4f6; }
+.gantt-bar--project { background: #002868; color: #ffffff; border-color: #002868; }
 
 .gantt-bar--project i {
   position: absolute;
