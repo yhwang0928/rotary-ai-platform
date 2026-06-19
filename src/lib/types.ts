@@ -23,6 +23,13 @@ export interface ProjectSummary {
   updated_at: string;
 }
 
+export interface AnnouncementSummary {
+  id: string;
+  title: string;
+  body: string | null;
+  created_at: string;
+}
+
 export interface TaskSummary {
   id: string;
   project_id: string;
@@ -46,6 +53,7 @@ export interface MeetingSummary {
   summary: string | null;
   notes: string | null;
   google_meet_url: string | null;
+  notes_doc_url: string | null;
 }
 
 export interface ActionItemSummary {
@@ -69,7 +77,6 @@ export interface MeetingDecision {
 export interface MeetingDetail {
   meeting: MeetingSummary;
   decisions: MeetingDecision[];
-  actionItems: ActionItemSummary[];
 }
 
 export interface RequirementSummary {
