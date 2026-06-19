@@ -24,7 +24,9 @@ a {
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 
@@ -120,6 +122,7 @@ h2 {
 
 .icon-button {
   display: inline-grid;
+  flex: 0 0 auto;
   width: 40px;
   height: 40px;
   place-items: center;
@@ -127,6 +130,27 @@ h2 {
   border-radius: 6px;
   background: #ffffff;
   color: #1a1f2b;
+}
+
+.row-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.row-actions a {
+  display: inline-grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+}
+
+.row-tail {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  min-width: 0;
 }
 
 .stats-grid,
@@ -177,6 +201,10 @@ h2 {
   padding: 20px;
 }
 
+.panel--wide {
+  grid-column: 1 / -1;
+}
+
 .panel-heading {
   display: flex;
   align-items: center;
@@ -185,6 +213,33 @@ h2 {
 
 .panel-heading h2 {
   margin-bottom: 0;
+}
+
+.segmented-control {
+  display: inline-flex;
+  margin-left: auto;
+  overflow: hidden;
+  border: 1px solid #c7d0df;
+  border-radius: 6px;
+}
+
+.segmented-control button {
+  min-width: 44px;
+  border: 0;
+  border-right: 1px solid #c7d0df;
+  padding: 7px 12px;
+  background: #ffffff;
+  color: #465164;
+  font-weight: 800;
+}
+
+.segmented-control button:last-child {
+  border-right: 0;
+}
+
+.segmented-control button.is-active {
+  background: #275da8;
+  color: #ffffff;
 }
 
 .list {
@@ -207,6 +262,13 @@ h2 {
   min-width: 0;
 }
 
+.list-row p {
+  margin: 4px 0 0;
+  color: #667085;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
 .list-row strong,
 .task-table__row strong {
   display: block;
@@ -217,8 +279,10 @@ h2 {
 
 .list-row span,
 .task-table span {
+  display: block;
   color: #667085;
   font-size: 0.9rem;
+  line-height: 1.45;
 }
 
 .task-table {
@@ -246,9 +310,181 @@ h2 {
   padding-top: 8px;
 }
 
+.edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+
+.edit-grid label {
+  display: grid;
+  gap: 5px;
+  color: #465164;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.edit-grid input,
+.edit-grid select,
+.edit-grid textarea {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid #c7d0df;
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: #1a1f2b;
+  background: #ffffff;
+}
+
+.edit-grid textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
 .empty {
   margin: 8px 0 0;
   color: #667085;
+}
+
+.gantt-scroll {
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.gantt-chart {
+  display: grid;
+  gap: 14px;
+  min-width: 900px;
+}
+
+.gantt-axis,
+.gantt-row {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+}
+
+.gantt-timeline,
+.gantt-track {
+  position: relative;
+  min-height: 34px;
+  border-left: 1px solid #d8dee8;
+  border-right: 1px solid #d8dee8;
+  background:
+    repeating-linear-gradient(
+      to right,
+      rgba(102, 112, 133, 0.14) 0,
+      rgba(102, 112, 133, 0.14) 1px,
+      transparent 1px,
+      transparent 16.66%
+    ),
+    #f8fafc;
+}
+
+.gantt-axis {
+  color: #667085;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.gantt-tick {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+}
+
+.gantt-group {
+  display: grid;
+  gap: 8px;
+}
+
+.gantt-group h3 {
+  margin: 6px 0 0;
+  color: #344054;
+  font-size: 0.92rem;
+}
+
+.gantt-task-meta,
+.gantt-project-meta {
+  min-width: 0;
+}
+
+.gantt-task-meta strong,
+.gantt-project-meta strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gantt-task-meta span,
+.gantt-project-meta span {
+  display: block;
+  color: #667085;
+  font-size: 0.82rem;
+}
+
+.gantt-track {
+  border-radius: 6px;
+}
+
+.gantt-bar {
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  display: flex;
+  min-width: 28px;
+  align-items: center;
+  overflow: hidden;
+  border-radius: 5px;
+  padding: 0 8px;
+  background: #275da8;
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.gantt-bar--project {
+  background: #64748b;
+}
+
+.gantt-bar--project i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: #15803d;
+}
+
+.gantt-bar span {
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gantt-bar--backlog,
+.gantt-bar--todo {
+  background: #64748b;
+}
+
+.gantt-bar--doing {
+  background: #2563eb;
+}
+
+.gantt-bar--review {
+  background: #7c3aed;
+}
+
+.gantt-bar--done {
+  background: #15803d;
+}
+
+.gantt-bar--blocked {
+  background: #dc2626;
 }
 
 @media (max-width: 820px) {
@@ -288,8 +524,22 @@ h2 {
 
   .task-table__head,
   .task-table__row {
-    grid-template-columns: minmax(0, 1fr) 64px 72px;
+    grid-template-columns: minmax(0, 1fr);
     gap: 8px;
+  }
+
+  .edit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .gantt-chart {
+    min-width: 760px;
+  }
+
+  .gantt-axis,
+  .gantt-row {
+    grid-template-columns: 240px minmax(0, 1fr);
+    gap: 12px;
   }
 
   .task-table__head,
