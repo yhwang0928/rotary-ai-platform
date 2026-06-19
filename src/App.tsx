@@ -86,8 +86,8 @@ function formatYearMonth(date: Date) {
   return `${date.getFullYear()}/${date.getMonth() + 1}`;
 }
 
-function nullable(value: string) {
-  return value.trim() === "" ? null : value;
+function nullable(value: string | null | undefined) {
+  return value?.trim() ? value : null;
 }
 
 function slugify(value: string) {
@@ -97,6 +97,35 @@ function slugify(value: string) {
     .replace(/['"]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+async function updateSupabaseRow<T>(
+  table: string,
+  id: string,
+  payload: Record<string, string | null>,
+  select: string,
+) {
+  if (!supabase) {
+    throw new Error("Supabase 尚未設定。");
+  }
+
+  const timeout = new Promise<never>((_resolve, reject) => {
+    window.setTimeout(() => reject(new Error("更新逾時，請稍後再試。")), 15000);
+  });
+  const update = supabase
+    .from(table)
+    .update(payload)
+    .eq("id", id)
+    .select(select)
+    .maybeSingle();
+
+  const { data, error } = await Promise.race([update, timeout]);
+  if (error) throw error;
+  if (!data) {
+    throw new Error("沒有更新到任何資料，請確認你是專案負責人或管理員。");
+  }
+
+  return data as T;
 }
 
 function App() {
@@ -513,15 +542,10 @@ function App() {
   }
 
   async function saveEdit() {
-    if (!supabase || !editing) return;
+    if (!supabase || !editing || !session?.access_token) return;
 
     setSaveMessage("儲存中...");
     const { kind, id, values } = editing;
-    const tableByKind: Record<EditKind, string> = {
-      project: "projects",
-      task: "tasks",
-      meeting: "meetings",
-    };
     const payloadByKind: Record<EditKind, Record<string, string | null>> = {
       project: {
         name: nullable(values.name),
@@ -555,30 +579,55 @@ function App() {
       },
     };
 
-    const { error } = await supabase.from(tableByKind[kind]).update(payloadByKind[kind]).eq("id", id);
+    try {
+      if (kind === "project") {
+        setSaveMessage("送出專案更新...");
+        const updatedProject = await updateSupabaseRow<ProjectSummary>(
+          "projects",
+          id,
+          payloadByKind.project,
+          "id,name,slug,description,status,start_date,expected_end_date,google_drive_folder_url,drive_folder_label,drive_folder_purpose,updated_at",
+        );
 
-    if (error) {
-      console.error(error);
-      setSaveMessage("儲存失敗，請確認你有編輯權限。");
-      return;
-    }
+        setSaveMessage("已更新。");
+        setProjects((items) => items.map((item) => (item.id === id ? updatedProject : item)));
+        setEditing(null);
+        return;
+      }
 
-    const updateList = <T extends { id: string }>(items: T[]) =>
-      items.map((item) => (item.id === id ? ({ ...item, ...payloadByKind[kind] } as T) : item));
+      if (kind === "meeting") {
+        setSaveMessage("送出會議更新...");
+        const updatedMeeting = await updateSupabaseRow<MeetingSummary>(
+          "meetings",
+          id,
+          payloadByKind.meeting,
+          "id,project_id,title,meeting_date,summary,notes,google_meet_url,notes_doc_url",
+        );
 
-    if (kind === "project") setProjects(updateList);
-    if (kind === "task") setTasks(updateList);
-    if (kind === "meeting") {
-      setMeetings(updateList);
-      setMeetingDetail((current) =>
-        current?.meeting.id === id
-          ? { ...current, meeting: { ...current.meeting, ...payloadByKind.meeting } as MeetingSummary }
-          : current,
+        setSaveMessage("已更新。");
+        setMeetings((items) => items.map((item) => (item.id === id ? updatedMeeting : item)));
+        setMeetingDetail((current) =>
+          current?.meeting.id === id ? { ...current, meeting: updatedMeeting } : current,
+        );
+        setEditing(null);
+        return;
+      }
+
+      setSaveMessage("送出任務更新...");
+      const updatedTask = await updateSupabaseRow<TaskSummary>(
+        "tasks",
+        id,
+        payloadByKind.task,
+        "id,project_id,title,status,priority,start_date,due_date,completed_date,blocker_reason,owner_names,collaborator_names,output_title",
       );
-    }
 
-    setEditing(null);
-    setSaveMessage("已更新。");
+      setSaveMessage("已更新。");
+      setTasks((items) => items.map((item) => (item.id === id ? updatedTask : item)));
+      setEditing(null);
+    } catch (error) {
+      console.error(error);
+      setSaveMessage(error instanceof Error ? `儲存失敗：${error.message}` : "儲存失敗，請確認你有編輯權限。");
+    }
   }
 
   function isEditing(kind: EditKind, id: string) {
