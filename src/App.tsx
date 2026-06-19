@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, CalendarDays, ChevronDown, ChevronUp, ExternalLink, FileDown, FolderKanban, LogOut, Megaphone, Pencil, Plus, Save, X } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { StatCard } from "./components/StatCard";
@@ -153,6 +153,53 @@ function App() {
   const [newAnnouncement, setNewAnnouncement] = useState({ title: "", body: "" });
   const [importingMeetingId, setImportingMeetingId] = useState<string | null>(null);
 
+  const loadDashboardData = useCallback(async (showLoading = true) => {
+    if (!supabase) return;
+
+    if (showLoading) setLoadState("loading");
+    try {
+      const [projectResult, taskResult, meetingResult, announcementResult] = await Promise.all([
+        supabase
+          .from("projects")
+          .select("id,name,slug,description,status,start_date,expected_end_date,google_drive_folder_url,drive_folder_label,drive_folder_purpose,updated_at")
+          .order("name"),
+        supabase
+          .from("tasks")
+          .select("id,project_id,title,status,priority,start_date,due_date,completed_date,blocker_reason,owner_names,collaborator_names,output_title")
+          .is("archived_at", null)
+          .order("due_date", { ascending: true, nullsFirst: false }),
+        supabase
+          .from("meetings")
+          .select("id,project_id,title,meeting_date,summary,notes,google_meet_url,notes_doc_url")
+          .order("meeting_date", { ascending: false }),
+        supabase
+          .from("announcements")
+          .select("id,title,body,created_at")
+          .order("created_at", { ascending: false })
+          .limit(5),
+      ]);
+
+      const firstError =
+        projectResult.error ||
+        taskResult.error ||
+        meetingResult.error;
+
+      if (firstError) throw firstError;
+      if (announcementResult.error) {
+        console.warn("Announcements unavailable:", announcementResult.error);
+      }
+
+      setProjects(projectResult.data ?? []);
+      setTasks(taskResult.data ?? []);
+      setMeetings(meetingResult.data ?? []);
+      setAnnouncements(announcementResult.error ? [] : announcementResult.data ?? []);
+      setLoadState("ready");
+    } catch (error) {
+      console.error(error);
+      setLoadState("error");
+    }
+  }, []);
+
   useEffect(() => {
     if (!supabase) return;
 
@@ -172,49 +219,8 @@ function App() {
   useEffect(() => {
     if (!supabase || !session) return;
 
-    setLoadState("loading");
-    Promise.all([
-      supabase
-        .from("projects")
-        .select("id,name,slug,description,status,start_date,expected_end_date,google_drive_folder_url,drive_folder_label,drive_folder_purpose,updated_at")
-        .order("name"),
-      supabase
-        .from("tasks")
-        .select("id,project_id,title,status,priority,start_date,due_date,completed_date,blocker_reason,owner_names,collaborator_names,output_title")
-        .is("archived_at", null)
-        .order("due_date", { ascending: true, nullsFirst: false }),
-      supabase
-        .from("meetings")
-        .select("id,project_id,title,meeting_date,summary,notes,google_meet_url,notes_doc_url")
-        .order("meeting_date", { ascending: false }),
-      supabase
-        .from("announcements")
-        .select("id,title,body,created_at")
-        .order("created_at", { ascending: false })
-        .limit(5),
-    ])
-      .then(([projectResult, taskResult, meetingResult, announcementResult]) => {
-        const firstError =
-          projectResult.error ||
-          taskResult.error ||
-          meetingResult.error;
-
-        if (firstError) throw firstError;
-        if (announcementResult.error) {
-          console.warn("Announcements unavailable:", announcementResult.error);
-        }
-
-        setProjects(projectResult.data ?? []);
-        setTasks(taskResult.data ?? []);
-        setMeetings(meetingResult.data ?? []);
-        setAnnouncements(announcementResult.error ? [] : announcementResult.data ?? []);
-        setLoadState("ready");
-      })
-      .catch((error) => {
-        console.error(error);
-        setLoadState("error");
-      });
-  }, [session]);
+    void loadDashboardData();
+  }, [loadDashboardData, session]);
 
   const taskStats = useMemo(() => {
     const today = new Date();
@@ -589,9 +595,10 @@ function App() {
           "id,name,slug,description,status,start_date,expected_end_date,google_drive_folder_url,drive_folder_label,drive_folder_purpose,updated_at",
         );
 
-        setSaveMessage("已更新。");
         setProjects((items) => items.map((item) => (item.id === id ? updatedProject : item)));
         setEditing(null);
+        await loadDashboardData(false);
+        setSaveMessage("已更新，甘特圖已同步。");
         return;
       }
 
@@ -621,9 +628,10 @@ function App() {
         "id,project_id,title,status,priority,start_date,due_date,completed_date,blocker_reason,owner_names,collaborator_names,output_title",
       );
 
-      setSaveMessage("已更新。");
       setTasks((items) => items.map((item) => (item.id === id ? updatedTask : item)));
       setEditing(null);
+      await loadDashboardData(false);
+      setSaveMessage("已更新，甘特圖已同步。");
     } catch (error) {
       console.error(error);
       setSaveMessage(error instanceof Error ? `儲存失敗：${error.message}` : "儲存失敗，請確認你有編輯權限。");
@@ -673,10 +681,14 @@ function App() {
   }
 
   function editInput(field: string, label: string, type = "text") {
+    const handleInput = (event: React.ChangeEvent<HTMLInputElement>) => {
+      setEditValue(field, event.target.value);
+    };
+
     return (
       <label>
         {label}
-        <input type={type} value={editing?.values[field] ?? ""} onChange={(event) => setEditValue(field, event.target.value)} />
+        <input type={type} value={editing?.values[field] ?? ""} onChange={handleInput} onInput={handleInput} />
       </label>
     );
   }
@@ -706,10 +718,14 @@ function App() {
   }
 
   function newProjectInput(field: keyof NewProjectState, label: string, type = "text") {
+    const handleInput = (event: React.ChangeEvent<HTMLInputElement>) => {
+      setNewProjectValue(field, event.target.value);
+    };
+
     return (
       <label>
         {label}
-        <input type={type} value={newProject[field]} onChange={(event) => setNewProjectValue(field, event.target.value)} />
+        <input type={type} value={newProject[field]} onChange={handleInput} onInput={handleInput} />
       </label>
     );
   }
