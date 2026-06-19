@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, ChevronDown, ChevronUp, ExternalLink, FolderKanban, LogOut, Megaphone, Pencil, Plus, Save, X } from "lucide-react";
+import { ArrowLeft, CalendarDays, ChevronDown, ChevronUp, ExternalLink, FileDown, FolderKanban, LogOut, Megaphone, Pencil, Plus, Save, X } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { StatCard } from "./components/StatCard";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
@@ -116,12 +116,13 @@ function App() {
   const [meetingDetailLoading, setMeetingDetailLoading] = useState(false);
   const [isAddingProject, setIsAddingProject] = useState(false);
   const [newProject, setNewProject] = useState<NewProjectState>(emptyNewProject);
-  const [openProjectId, setOpenProjectId] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [kpiModal, setKpiModal] = useState<"total" | "due7" | "overdue" | "blocked" | null>(null);
   const [isAddingMeeting, setIsAddingMeeting] = useState(false);
   const [newMeeting, setNewMeeting] = useState({ title: "", meeting_date: "", summary: "", notes_doc_url: "" });
   const [isAddingAnnouncement, setIsAddingAnnouncement] = useState(false);
   const [newAnnouncement, setNewAnnouncement] = useState({ title: "", body: "" });
+  const [importingMeetingId, setImportingMeetingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabase) return;
@@ -300,7 +301,7 @@ function App() {
     setTasks([]);
     setMeetings([]);
     setAnnouncements([]);
-    setOpenProjectId(null);
+    setSelectedProjectId(null);
   }
 
   async function openMeetingDetail(meeting: MeetingSummary) {
@@ -350,6 +351,40 @@ function App() {
     setMeetings((prev) => prev.filter((m) => m.id !== id));
     if (meetingDetail?.meeting.id === id) setMeetingDetail(null);
     setSaveMessage("已刪除。");
+  }
+
+  async function importMeetingDoc(meeting: MeetingSummary) {
+    if (!supabase || !meeting.notes_doc_url) return;
+
+    setImportingMeetingId(meeting.id);
+    setSaveMessage("正在匯入 Google Doc...");
+    const { data, error } = await supabase.functions.invoke("import-meeting-doc", {
+      body: {
+        meetingId: meeting.id,
+        url: meeting.notes_doc_url,
+      },
+    });
+    setImportingMeetingId(null);
+
+    if (error) {
+      console.error(error);
+      setSaveMessage("匯入失敗。請確認 Google Doc 已開放連結讀取，或已發布到網路。");
+      return;
+    }
+
+    const updatedMeeting = (data as { meeting?: MeetingSummary }).meeting;
+    if (!updatedMeeting) {
+      setSaveMessage("匯入失敗，後端未回傳會議資料。");
+      return;
+    }
+
+    setMeetings((current) => current.map((item) => (item.id === updatedMeeting.id ? updatedMeeting : item)));
+    setMeetingDetail((current) =>
+      current?.meeting.id === updatedMeeting.id
+        ? { ...current, meeting: updatedMeeting }
+        : current,
+    );
+    setSaveMessage("已從 Google Doc 匯入會議記錄。");
   }
 
   async function addAnnouncement() {
@@ -707,6 +742,210 @@ function App() {
     overdue: "逾期任務",
     blocked: "受阻任務",
   };
+  const kpiProjectRows = Object.fromEntries(
+    Object.entries(kpiTasks).map(([key, matchingTasks]) => {
+      const rows = projects
+        .map((project) => {
+          const projectTasks = tasks.filter((task) => task.project_id === project.id);
+          const matchedTasks = matchingTasks.filter((task) => task.project_id === project.id);
+          const activeTasks = projectTasks.filter((task) => task.status !== "done" && task.status !== "cancelled");
+          const nextDue = activeTasks
+            .map((task) => task.due_date)
+            .filter((dueDate): dueDate is string => Boolean(dueDate))
+            .sort()[0] ?? null;
+
+          return {
+            project,
+            matchedCount: matchedTasks.length,
+            totalCount: projectTasks.length,
+            activeCount: activeTasks.length,
+            nextDue,
+          };
+        })
+        .filter((row) => row.matchedCount > 0)
+        .sort((a, b) => b.matchedCount - a.matchedCount || a.project.name.localeCompare(b.project.name, "zh-Hant"));
+
+      return [key, rows];
+    }),
+  ) as Record<
+    string,
+    Array<{
+      project: ProjectSummary;
+      matchedCount: number;
+      totalCount: number;
+      activeCount: number;
+      nextDue: string | null;
+    }>
+  >;
+
+  const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
+  const selectedProjectTasks = selectedProject
+    ? tasks.filter((task) => task.project_id === selectedProject.id)
+    : [];
+  const selectedProjectMeetings = selectedProject
+    ? meetings.filter((meeting) => meeting.project_id === selectedProject.id)
+    : [];
+
+  if (selectedProject) {
+    return (
+      <main className="shell">
+        <header className="topbar">
+          <div className="topbar-brand">
+            <img src="/rotary-logo.png" alt="扶輪標誌" className="rotary-logo" />
+            <div>
+              <p className="eyebrow">國際扶輪 3481 地區 AI 委員會</p>
+              <h1>{APP_NAME}</h1>
+            </div>
+          </div>
+          <button className="icon-button" type="button" onClick={signOut} title="登出" aria-label="登出">
+            <LogOut size={18} />
+          </button>
+        </header>
+
+        {saveMessage ? <section className="notice">{saveMessage}</section> : null}
+
+        <section className="project-page">
+          <button className="back-button" type="button" onClick={() => setSelectedProjectId(null)}>
+            <ArrowLeft size={16} />
+            返回專案列表
+          </button>
+
+          <div className="project-hero">
+            <div>
+              <p className="eyebrow">專案詳情</p>
+              <h2>{selectedProject.name}</h2>
+              <p>{selectedProject.description ?? "尚未填寫專案說明。"}</p>
+            </div>
+            <div className="row-actions">
+              {selectedProject.google_drive_folder_url ? (
+                <a href={selectedProject.google_drive_folder_url} target="_blank" rel="noreferrer" title="開啟雲端硬碟資料夾">
+                  <ExternalLink size={16} />
+                </a>
+              ) : null}
+              {editActions("project", selectedProject)}
+            </div>
+          </div>
+
+          {isEditing("project", selectedProject.id) ? (
+            <section className="panel">
+              <div className="edit-grid">
+                {editInput("name", "專案名稱")}
+                {editSelect("status", "狀態", projectStatusOptions)}
+                {editInput("start_date", "開始時間", "date")}
+                {editInput("expected_end_date", "期望結束時間", "date")}
+                {editTextarea("description", "說明")}
+                {editInput("google_drive_folder_url", "Google Drive 連結")}
+                {editInput("drive_folder_label", "Drive 資料夾")}
+                {editTextarea("drive_folder_purpose", "Drive 用途")}
+              </div>
+            </section>
+          ) : null}
+
+          <section className="project-detail-grid">
+            <article className="detail-card">
+              <span>狀態</span>
+              <strong>{labelFromMap(projectStatusLabels, selectedProject.status)}</strong>
+            </article>
+            <article className="detail-card">
+              <span>開始時間</span>
+              <strong>{selectedProject.start_date ?? "未設定"}</strong>
+            </article>
+            <article className="detail-card">
+              <span>期望結束</span>
+              <strong>{selectedProject.expected_end_date ?? "未設定"}</strong>
+            </article>
+            <article className="detail-card">
+              <span>任務數</span>
+              <strong>{selectedProjectTasks.length}</strong>
+            </article>
+          </section>
+
+          <section className="panel">
+            <div className="panel-heading">
+              <FolderKanban size={18} />
+              <h2>專案資料</h2>
+            </div>
+            <div className="detail-list">
+              <div>
+                <span>英文代碼</span>
+                <strong>{selectedProject.slug}</strong>
+              </div>
+              <div>
+                <span>Drive 資料夾</span>
+                <strong>{selectedProject.drive_folder_label ?? "未設定"}</strong>
+              </div>
+              <div>
+                <span>Drive 用途</span>
+                <p>{selectedProject.drive_folder_purpose ?? "未設定"}</p>
+              </div>
+              <div>
+                <span>最後更新</span>
+                <strong>{new Date(selectedProject.updated_at).toLocaleString("zh-TW")}</strong>
+              </div>
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="panel-heading">
+              <CalendarDays size={18} />
+              <h2>專案任務</h2>
+            </div>
+            <div className="detail-table">
+              <div className="detail-table__head">
+                <span>任務</span>
+                <span>狀態</span>
+                <span>負責人</span>
+                <span>期限</span>
+              </div>
+              {selectedProjectTasks.map((task) => (
+                <div className="detail-table__row" key={task.id}>
+                  <div>
+                    <strong>{task.title}</strong>
+                    {task.output_title ? <span>產出：{task.output_title}</span> : null}
+                  </div>
+                  <span>{taskStatusLabels[task.status]}</span>
+                  <span>{task.owner_names ?? "未指派"}</span>
+                  <span>{task.due_date ?? "未設定"}</span>
+                </div>
+              ))}
+              {selectedProjectTasks.length === 0 ? <p className="empty">此專案尚未建立任務。</p> : null}
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="panel-heading">
+              <CalendarDays size={18} />
+              <h2>關聯會議</h2>
+            </div>
+            <div className="list">
+              {selectedProjectMeetings.map((meeting) => (
+                <article className="list-row" key={meeting.id}>
+                  <div>
+                    <strong>{meeting.title}</strong>
+                    <span>{meeting.meeting_date}</span>
+                    {meeting.summary ? <p>{meeting.summary}</p> : null}
+                  </div>
+                  <div className="row-actions">
+                    {meeting.google_meet_url ? (
+                      <a href={meeting.google_meet_url} target="_blank" rel="noreferrer" title="開啟 Google Meet">
+                        <ExternalLink size={16} />
+                      </a>
+                    ) : null}
+                    {meeting.notes_doc_url ? (
+                      <a href={meeting.notes_doc_url} target="_blank" rel="noreferrer" title="開啟 Google Doc">
+                        <ExternalLink size={16} />
+                      </a>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+              {selectedProjectMeetings.length === 0 ? <p className="empty">此專案尚未連結會議。</p> : null}
+            </div>
+          </section>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="shell">
@@ -727,28 +966,38 @@ function App() {
         <div className="kpi-modal-backdrop" onClick={() => setKpiModal(null)}>
           <div className="kpi-modal" onClick={(e) => e.stopPropagation()}>
             <div className="kpi-modal-header">
-              <h3>{kpiLabels[kpiModal]}（{kpiTasks[kpiModal].length} 項）</h3>
+              <h3>{kpiLabels[kpiModal]}（{kpiProjectRows[kpiModal].length} 個專案 / {kpiTasks[kpiModal].length} 項任務）</h3>
               <button className="icon-button" type="button" onClick={() => setKpiModal(null)} aria-label="關閉">
                 <X size={16} />
               </button>
             </div>
             <div className="kpi-modal-body">
-              {kpiTasks[kpiModal].length === 0 ? (
-                <p className="empty">目前沒有符合條件的任務。</p>
+              {kpiProjectRows[kpiModal].length === 0 ? (
+                <p className="empty">目前沒有符合條件的專案。</p>
               ) : (
                 <>
-                  <div className="kpi-task-row" style={{ color: "var(--gold)", fontWeight: 700, fontSize: "0.75rem", letterSpacing: "0.05em" }}>
-                    <span>任務</span><span>負責人</span><span>期限</span>
+                  <div className="kpi-project-row kpi-project-row--head">
+                    <span>專案</span>
+                    <span>符合任務</span>
+                    <span>下一期限</span>
                   </div>
-                  {kpiTasks[kpiModal].map((t) => (
-                    <div className="kpi-task-row" key={t.id}>
+                  {kpiProjectRows[kpiModal].map((row) => (
+                    <button
+                      className="kpi-project-row"
+                      type="button"
+                      key={row.project.id}
+                      onClick={() => {
+                        setKpiModal(null);
+                        setSelectedProjectId(row.project.id);
+                      }}
+                    >
                       <div>
-                        <strong>{t.title}</strong>
-                        <span>{taskStatusLabels[t.status]}</span>
+                        <strong>{row.project.name}</strong>
+                        <span>{labelFromMap(projectStatusLabels, row.project.status)} · 全部 {row.totalCount} 項 / 進行中 {row.activeCount} 項</span>
                       </div>
-                      <span>{t.owner_names ?? "—"}</span>
-                      <span>{t.due_date ?? "—"}</span>
-                    </div>
+                      <span>{row.matchedCount} 項</span>
+                      <span>{row.nextDue ?? "未設定"}</span>
+                    </button>
                   ))}
                 </>
               )}
@@ -930,56 +1179,28 @@ function App() {
             </div>
           ) : null}
           <div className="list">
-            {projects.map((project) => {
-              const isOpen = openProjectId === project.id || isEditing("project", project.id);
-
-              return (
-                <article className="list-row project-list-row" key={project.id}>
-                  <div className="project-list-main">
-                    <button
-                      className="project-title-button"
-                      type="button"
-                      onClick={() => setOpenProjectId((current) => (current === project.id ? null : project.id))}
-                      aria-expanded={isOpen}
-                    >
-                      <strong>{project.name}</strong>
-                      {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                    </button>
-                    {isOpen ? (
-                      isEditing("project", project.id) ? (
-                        <div className="edit-grid">
-                          {editInput("name", "專案名稱")}
-                          {editSelect("status", "狀態", projectStatusOptions)}
-                          {editInput("start_date", "開始時間", "date")}
-                          {editInput("expected_end_date", "期望結束時間", "date")}
-                          {editTextarea("description", "說明")}
-                          {editInput("google_drive_folder_url", "Google Drive 連結")}
-                          {editInput("drive_folder_label", "Drive 資料夾")}
-                          {editTextarea("drive_folder_purpose", "Drive 用途")}
-                        </div>
-                      ) : (
-                        <div className="project-detail">
-                          <span>{labelFromMap(projectStatusLabels, project.status)}</span>
-                          <span>{project.start_date ?? "未設定開始"} - {project.expected_end_date ?? "未設定結束"}</span>
-                          {project.description ? <p>{project.description}</p> : null}
-                          {project.drive_folder_label ? (
-                            <p>{project.drive_folder_label} · {project.drive_folder_purpose}</p>
-                          ) : null}
-                        </div>
-                      )
-                    ) : null}
-                  </div>
-                  <div className="row-actions">
-                    {project.google_drive_folder_url && isOpen && !isEditing("project", project.id) ? (
-                      <a href={project.google_drive_folder_url} target="_blank" rel="noreferrer" title="開啟雲端硬碟資料夾">
-                        <ExternalLink size={16} />
-                      </a>
-                    ) : null}
-                    {editActions("project", project)}
-                  </div>
-                </article>
-              );
-            })}
+            {projects.map((project) => (
+              <article className="list-row project-list-row" key={project.id}>
+                <button className="project-title-button" type="button" onClick={() => setSelectedProjectId(project.id)}>
+                  <strong>{project.name}</strong>
+                  <ChevronDown size={16} />
+                </button>
+                <div className="row-actions">
+                  <button
+                    className="icon-button"
+                    type="button"
+                    onClick={() => {
+                      setSelectedProjectId(project.id);
+                      startEdit("project", project);
+                    }}
+                    title="編輯"
+                    aria-label="編輯"
+                  >
+                    <Pencil size={16} />
+                  </button>
+                </div>
+              </article>
+            ))}
             {projects.length === 0 && loadState !== "loading" ? <p className="empty">目前沒有可查看的專案。</p> : null}
           </div>
         </div>
@@ -1070,6 +1291,18 @@ function App() {
                         {isOpen ? <ChevronUp size={16} style={{ color: "var(--gold)" }} /> : <ChevronDown size={16} style={{ color: "var(--text-muted)" }} />}
                       </div>
                     </button>
+                    {meeting.notes_doc_url ? (
+                      <button
+                        className="icon-button"
+                        type="button"
+                        onClick={() => importMeetingDoc(meeting)}
+                        title="從 Google Doc 匯入"
+                        aria-label="從 Google Doc 匯入"
+                        disabled={importingMeetingId === meeting.id}
+                      >
+                        <FileDown size={16} />
+                      </button>
+                    ) : null}
                     {meetingEditActions(meeting)}
                     <button
                       className="icon-button icon-button--danger"
