@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, CalendarDays, ChevronDown, ChevronUp, ExternalLink, FileDown, FolderKanban, LogOut, Megaphone, Pencil, Plus, Save, X } from "lucide-react";
+import { ArrowLeft, CalendarDays, ChevronDown, ExternalLink, FileDown, FolderKanban, LogOut, Megaphone, Pencil, Plus, Save, X } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { StatCard } from "./components/StatCard";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
@@ -146,6 +146,7 @@ function App() {
   const [isAddingProject, setIsAddingProject] = useState(false);
   const [newProject, setNewProject] = useState<NewProjectState>(emptyNewProject);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
   const [kpiModal, setKpiModal] = useState<"total" | "due7" | "overdue" | "blocked" | null>(null);
   const [isAddingMeeting, setIsAddingMeeting] = useState(false);
   const [newMeeting, setNewMeeting] = useState({ title: "", meeting_date: "", notes: "", notes_doc_url: "" });
@@ -337,14 +338,13 @@ function App() {
     setMeetings([]);
     setAnnouncements([]);
     setSelectedProjectId(null);
+    setSelectedMeetingId(null);
   }
 
   async function openMeetingDetail(meeting: MeetingSummary) {
     if (!supabase) return;
-    if (meetingDetail?.meeting.id === meeting.id) {
-      setMeetingDetail(null);
-      return;
-    }
+    setSelectedProjectId(null);
+    setSelectedMeetingId(meeting.id);
     setMeetingDetailLoading(true);
     const decisionsResult = await supabase
       .from("meeting_decisions")
@@ -386,6 +386,7 @@ function App() {
     if (error) { setSaveMessage("刪除失敗。"); return; }
     setMeetings((prev) => prev.filter((m) => m.id !== id));
     if (meetingDetail?.meeting.id === id) setMeetingDetail(null);
+    if (selectedMeetingId === id) setSelectedMeetingId(null);
     setSaveMessage("已刪除。");
   }
 
@@ -851,6 +852,145 @@ function App() {
   const selectedProjectMeetings = selectedProject
     ? meetings.filter((meeting) => meeting.project_id === selectedProject.id)
     : [];
+  const selectedMeeting =
+    selectedMeetingId && meetingDetail?.meeting.id === selectedMeetingId
+      ? meetingDetail.meeting
+      : meetings.find((meeting) => meeting.id === selectedMeetingId) ?? null;
+  const selectedMeetingProject = selectedMeeting?.project_id
+    ? projects.find((project) => project.id === selectedMeeting.project_id) ?? null
+    : null;
+  const selectedMeetingDecisions =
+    selectedMeetingId && meetingDetail?.meeting.id === selectedMeetingId ? meetingDetail.decisions : [];
+
+  if (selectedMeeting) {
+    return (
+      <main className="shell">
+        <header className="topbar">
+          <div className="topbar-brand">
+            <img src="/rotary-logo.png" alt="扶輪標誌" className="rotary-logo" />
+            <div>
+              <p className="eyebrow">國際扶輪 3481 地區 AI 委員會</p>
+              <h1>{APP_NAME}</h1>
+            </div>
+          </div>
+          <button className="icon-button" type="button" onClick={signOut} title="登出" aria-label="登出">
+            <LogOut size={18} />
+          </button>
+        </header>
+
+        {saveMessage ? <section className="notice">{saveMessage}</section> : null}
+
+        <section className="project-page">
+          <button className="back-button" type="button" onClick={() => setSelectedMeetingId(null)}>
+            <ArrowLeft size={16} />
+            返回會議列表
+          </button>
+
+          <div className="project-hero">
+            <div>
+              <p className="eyebrow">會議記錄</p>
+              <h2>{selectedMeeting.title}</h2>
+              <p>{selectedMeeting.meeting_date}</p>
+            </div>
+            <div className="row-actions">
+              {selectedMeeting.google_meet_url ? (
+                <a href={selectedMeeting.google_meet_url} target="_blank" rel="noreferrer" title="開啟 Google Meet">
+                  <ExternalLink size={16} />
+                </a>
+              ) : null}
+              {selectedMeeting.notes_doc_url ? (
+                <a href={selectedMeeting.notes_doc_url} target="_blank" rel="noreferrer" title="開啟 Google Doc">
+                  <ExternalLink size={16} />
+                </a>
+              ) : null}
+              {selectedMeeting.notes_doc_url ? (
+                <button
+                  className="icon-button"
+                  type="button"
+                  onClick={() => importMeetingDoc(selectedMeeting)}
+                  title="從 Google Doc 匯入"
+                  aria-label="從 Google Doc 匯入"
+                  disabled={importingMeetingId === selectedMeeting.id}
+                >
+                  <FileDown size={16} />
+                </button>
+              ) : null}
+              {meetingEditActions(selectedMeeting)}
+              <button
+                className="icon-button icon-button--danger"
+                type="button"
+                onClick={() => deleteMeeting(selectedMeeting.id)}
+                title="刪除此會議記錄"
+                aria-label="刪除"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+
+          {isEditing("meeting", selectedMeeting.id) ? (
+            <section className="panel">
+              <div className="edit-grid">
+                {editInput("title", "會議標題")}
+                {editInput("meeting_date", "會議日期", "date")}
+                {editInput("google_meet_url", "Google Meet 連結")}
+                {editInput("notes_doc_url", "Google Doc 連結")}
+                {editTextarea("notes", "完整會議內容")}
+              </div>
+            </section>
+          ) : null}
+
+          <section className="project-detail-grid">
+            <article className="detail-card">
+              <span>會議日期</span>
+              <strong>{selectedMeeting.meeting_date}</strong>
+            </article>
+            <article className="detail-card">
+              <span>關聯專案</span>
+              <strong>{selectedMeetingProject?.name ?? "未連結專案"}</strong>
+            </article>
+            <article className="detail-card">
+              <span>Google Doc</span>
+              <strong>{selectedMeeting.notes_doc_url ? "已連結" : "未連結"}</strong>
+            </article>
+            <article className="detail-card">
+              <span>會議決議</span>
+              <strong>{selectedMeetingDecisions.length}</strong>
+            </article>
+          </section>
+
+          <section className="panel">
+            <div className="panel-heading">
+              <CalendarDays size={18} />
+              <h2>完整原始資訊</h2>
+            </div>
+            {meetingDetailLoading ? (
+              <p className="empty">載入中...</p>
+            ) : selectedMeeting.notes || selectedMeetingDecisions.length > 0 ? (
+              <div className="meeting-original-content">
+                {selectedMeeting.notes ? <pre className="meeting-notes meeting-notes--full">{selectedMeeting.notes}</pre> : null}
+                {selectedMeetingDecisions.length > 0 ? (
+                  <div className="meeting-original-decisions">
+                    <h4>會議決議</h4>
+                    <ol className="meeting-decisions">
+                      {selectedMeetingDecisions.map((decision, index) => (
+                        <li key={decision.id}>
+                          <span className="decision-index">{index + 1}</span>
+                          <span>{decision.decision}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p className="empty">此會議尚未匯入或填寫完整內容。</p>
+            )}
+          </section>
+        </section>
+      </main>
+    );
+  }
 
   if (selectedProject) {
     return (
@@ -986,11 +1126,11 @@ function App() {
             <div className="list">
               {selectedProjectMeetings.map((meeting) => (
                 <article className="list-row" key={meeting.id}>
-                  <div>
+                  <button className="project-title-button" type="button" onClick={() => openMeetingDetail(meeting)}>
                     <strong>{meeting.title}</strong>
                     <span>{meeting.meeting_date}</span>
-                    {meeting.notes ? <pre className="meeting-notes">{meeting.notes}</pre> : null}
-                  </div>
+                    <ChevronDown size={16} />
+                  </button>
                   <div className="row-actions">
                     {meeting.google_meet_url ? (
                       <a href={meeting.google_meet_url} target="_blank" rel="noreferrer" title="開啟 Google Meet">
@@ -1326,109 +1466,34 @@ function App() {
           ) : null}
 
           <div className="list">
-            {meetings.map((meeting) => {
-              const isOpen = meetingDetail?.meeting.id === meeting.id;
-              return (
-                <div className="list-row--meeting" key={meeting.id}>
-                  <div style={{ display: "flex", alignItems: "flex-start", gap: "12px", padding: "12px 0" }}>
-                    <button
-                      className="meeting-row-header"
-                      type="button"
-                      onClick={() => openMeetingDetail(meeting)}
-                      aria-expanded={isOpen}
-                    >
-                      <div className="meeting-row-meta">
-                        <span className="meeting-title">{meeting.title}</span>
-                        <span className="meeting-date">{meeting.meeting_date}</span>
-                        {meeting.notes && !isOpen ? <pre className="meeting-notes meeting-notes--preview">{meeting.notes}</pre> : null}
-                      </div>
-                      <div className="row-actions">
-                        {meeting.google_meet_url ? (
-                          <a href={meeting.google_meet_url} target="_blank" rel="noreferrer" title="開啟 Google Meet" onClick={(e) => e.stopPropagation()}>
-                            <ExternalLink size={16} />
-                          </a>
-                        ) : null}
-                        {meeting.notes_doc_url ? (
-                          <a href={meeting.notes_doc_url} target="_blank" rel="noreferrer" title="開啟 Google Doc" onClick={(e) => e.stopPropagation()}>
-                            <ExternalLink size={16} />
-                          </a>
-                        ) : null}
-                        {isOpen ? <ChevronUp size={16} style={{ color: "var(--gold)" }} /> : <ChevronDown size={16} style={{ color: "var(--text-muted)" }} />}
-                      </div>
-                    </button>
-                    {meeting.notes_doc_url ? (
-                      <button
-                        className="icon-button"
-                        type="button"
-                        onClick={() => importMeetingDoc(meeting)}
-                        title="從 Google Doc 匯入"
-                        aria-label="從 Google Doc 匯入"
-                        disabled={importingMeetingId === meeting.id}
-                      >
-                        <FileDown size={16} />
-                      </button>
-                    ) : null}
-                    {meetingEditActions(meeting)}
+            {meetings.map((meeting) => (
+              <article className="list-row--meeting" key={meeting.id}>
+                <button
+                  className="meeting-row-header"
+                  type="button"
+                  onClick={() => openMeetingDetail(meeting)}
+                >
+                  <div className="meeting-row-meta">
+                    <span className="meeting-title">{meeting.title}</span>
+                    <span className="meeting-date">{meeting.meeting_date}</span>
+                    {meeting.notes ? <pre className="meeting-notes meeting-notes--preview">{meeting.notes}</pre> : null}
                   </div>
-
-                  {isOpen ? (
-                    <div className="meeting-detail">
-                      {meetingDetailLoading ? (
-                        <p className="empty">載入中...</p>
-                      ) : (
-                        <>
-                          {isEditing("meeting", meeting.id) ? (
-                            <section className="meeting-detail-section">
-                              <h4>編輯會議</h4>
-                              <div className="edit-grid">
-                                {editInput("title", "會議標題")}
-                                {editInput("meeting_date", "會議日期", "date")}
-                                {editInput("google_meet_url", "Google Meet 連結")}
-                                {editInput("notes_doc_url", "Google Doc 連結")}
-                                {editTextarea("notes", "完整會議內容")}
-                              </div>
-                            </section>
-                          ) : null}
-                          {meetingDetail!.meeting.notes ? (
-                            <section className="meeting-detail-section">
-                              <h4>完整會議內容</h4>
-                              <pre className="meeting-notes">{meetingDetail!.meeting.notes}</pre>
-                            </section>
-                          ) : null}
-                          {meetingDetail!.decisions.length > 0 ? (
-                            <section className="meeting-detail-section">
-                              <h4>會議決議（{meetingDetail!.decisions.length} 項）</h4>
-                              <ol className="meeting-decisions">
-                                {meetingDetail!.decisions.map((d, i) => (
-                                  <li key={d.id}>
-                                    <span className="decision-index">{i + 1}</span>
-                                    <span>{d.decision}</span>
-                                  </li>
-                                ))}
-                              </ol>
-                            </section>
-                          ) : null}
-                          {meetingDetail!.decisions.length === 0 ? (
-                            <p className="empty">此會議尚未記錄決議。</p>
-                          ) : null}
-                          <div className="meeting-detail-actions">
-                            <button
-                              className="icon-button icon-button--danger"
-                              type="button"
-                              onClick={() => deleteMeeting(meeting.id)}
-                              title="刪除此會議記錄"
-                              aria-label="刪除"
-                            >
-                              <X size={14} />
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
+                  <div className="row-actions">
+                    {meeting.google_meet_url ? (
+                      <a href={meeting.google_meet_url} target="_blank" rel="noreferrer" title="開啟 Google Meet" onClick={(e) => e.stopPropagation()}>
+                        <ExternalLink size={16} />
+                      </a>
+                    ) : null}
+                    {meeting.notes_doc_url ? (
+                      <a href={meeting.notes_doc_url} target="_blank" rel="noreferrer" title="開啟 Google Doc" onClick={(e) => e.stopPropagation()}>
+                        <ExternalLink size={16} />
+                      </a>
+                    ) : null}
+                    <ChevronDown size={16} style={{ color: "var(--text-muted)" }} />
+                  </div>
+                </button>
+              </article>
+            ))}
             {meetings.length === 0 && loadState !== "loading" ? <p className="empty">目前沒有會議紀錄。</p> : null}
           </div>
         </div>

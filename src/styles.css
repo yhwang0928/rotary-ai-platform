@@ -783,6 +783,16 @@ h4 {
   margin: 0;
 }
 
+.meeting-original-content {
+  display: grid;
+  gap: 1rem;
+}
+
+.meeting-original-decisions {
+  display: grid;
+  gap: 0.65rem;
+}
+
 .meeting-notes--preview {
   max-height: 3.2em;
   overflow: hidden;
