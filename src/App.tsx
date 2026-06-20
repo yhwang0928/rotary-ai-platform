@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, CalendarDays, ChevronDown, ExternalLink, FileDown, FolderKanban, LogOut, Megaphone, Pencil, Plus, Save, X } from "lucide-react";
+import { ArrowLeft, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FolderKanban, LogOut, Megaphone, Pencil, Plus, Save, X } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { StatCard } from "./components/StatCard";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
@@ -16,6 +16,16 @@ import "./styles.css";
 type LoadState = "idle" | "loading" | "ready" | "error";
 type EditKind = "project" | "task" | "meeting";
 type GanttScale = "week" | "month";
+type CalendarEventKind = "project" | "task" | "meeting";
+type CalendarEvent = {
+  id: string;
+  date: string;
+  title: string;
+  label: string;
+  kind: CalendarEventKind;
+  projectId?: string;
+  meetingId?: string;
+};
 type EditingState = {
   kind: EditKind;
   id: string;
@@ -47,6 +57,21 @@ type NewTaskState = {
 
 const APP_NAME = "3481 Rotary AI專案管理平台";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const weekdayLabels = ["日", "一", "二", "三", "四", "五", "六"];
+const rotaryMonthlyThemes: Record<number, { zh: string; en: string }> = {
+  0: { zh: "職業服務月", en: "Vocational Service" },
+  1: { zh: "和平建立與衝突預防月", en: "Peacebuilding and Conflict Prevention" },
+  2: { zh: "水資源、衛生與清潔月", en: "Water, Sanitation, and Hygiene" },
+  3: { zh: "環境月", en: "Environment" },
+  4: { zh: "青少年服務月", en: "Youth Service" },
+  5: { zh: "扶輪聯誼月", en: "Rotary Fellowships" },
+  6: { zh: "母子健康月", en: "Maternal and Child Health" },
+  7: { zh: "社員發展與新社成立月", en: "Membership and New Club Development" },
+  8: { zh: "基本教育與識字月", en: "Basic Education and Literacy" },
+  9: { zh: "社區經濟發展月", en: "Community Economic Development" },
+  10: { zh: "扶輪基金月", en: "Rotary Foundation" },
+  11: { zh: "疾病預防與治療月", en: "Disease Prevention and Treatment" },
+};
 
 const taskStatusLabels: Record<TaskSummary["status"], string> = {
   backlog: "待排程",
@@ -118,6 +143,12 @@ function formatYearMonth(date: Date) {
   return `${date.getFullYear()}/${date.getMonth() + 1}`;
 }
 
+function formatDateKey(date: Date) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
 function nullable(value: string | null | undefined) {
   return value?.trim() ? value : null;
 }
@@ -173,6 +204,10 @@ function App() {
   const [editing, setEditing] = useState<EditingState | null>(null);
   const [saveMessage, setSaveMessage] = useState("");
   const [ganttScale, setGanttScale] = useState<GanttScale>("week");
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), 1);
+  });
   const [meetingDetail, setMeetingDetail] = useState<MeetingDetail | null>(null);
   const [meetingDetailLoading, setMeetingDetailLoading] = useState(false);
   const [isAddingProject, setIsAddingProject] = useState(false);
@@ -354,6 +389,109 @@ function App() {
 
     return { rows, rangeStart, totalDays, ticks };
   }, [ganttScale, projects, tasks]);
+
+  const calendarData = useMemo(() => {
+    const monthStart = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
+    const monthEnd = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0);
+    const gridStart = new Date(monthStart);
+    gridStart.setDate(gridStart.getDate() - gridStart.getDay());
+    const gridEnd = new Date(monthEnd);
+    gridEnd.setDate(gridEnd.getDate() + (6 - gridEnd.getDay()));
+
+    const rawEvents: CalendarEvent[] = [
+      ...projects.flatMap((project) => {
+        const events: CalendarEvent[] = [];
+        if (project.start_date) {
+          events.push({
+            id: `project-start-${project.id}`,
+            date: project.start_date,
+            title: project.name,
+            label: "專案開始",
+            kind: "project",
+            projectId: project.id,
+          });
+        }
+        if (project.expected_end_date) {
+          events.push({
+            id: `project-end-${project.id}`,
+            date: project.expected_end_date,
+            title: project.name,
+            label: "期望結束",
+            kind: "project",
+            projectId: project.id,
+          });
+        }
+        return events;
+      }),
+      ...tasks
+        .filter((task) => task.due_date && task.status !== "cancelled")
+        .map((task) => ({
+          id: `task-${task.id}`,
+          date: task.due_date as string,
+          title: task.title,
+          label: taskStatusLabels[task.status],
+          kind: "task" as const,
+          projectId: task.project_id,
+        })),
+      ...meetings.map((meeting) => ({
+        id: `meeting-${meeting.id}`,
+        date: meeting.meeting_date,
+        title: meeting.title,
+        label: "會議",
+        kind: "meeting" as const,
+        projectId: meeting.project_id ?? undefined,
+        meetingId: meeting.id,
+      })),
+    ];
+
+    const events = rawEvents
+      .filter((event) => {
+        const date = toLocalDate(event.date);
+        return date && date >= gridStart && date <= gridEnd;
+      })
+      .sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title, "zh-Hant"));
+
+    const cells = [];
+    const cursor = new Date(gridStart);
+    while (cursor <= gridEnd) {
+      const dateKey = formatDateKey(cursor);
+      cells.push({
+        date: new Date(cursor),
+        dateKey,
+        isCurrentMonth: cursor.getMonth() === calendarMonth.getMonth(),
+        events: events.filter((event) => event.date === dateKey),
+      });
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    const monthEvents = events.filter((event) => {
+      const date = toLocalDate(event.date);
+      return date && date >= monthStart && date <= monthEnd;
+    });
+
+    return {
+      title: `${calendarMonth.getFullYear()} 年 ${calendarMonth.getMonth() + 1} 月`,
+      theme: rotaryMonthlyThemes[calendarMonth.getMonth()],
+      cells,
+      monthEvents,
+    };
+  }, [calendarMonth, meetings, projects, tasks]);
+
+  function shiftCalendarMonth(offset: number) {
+    setCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1));
+  }
+
+  function openCalendarEvent(event: CalendarEvent) {
+    if (event.meetingId) {
+      const meeting = meetings.find((item) => item.id === event.meetingId);
+      if (meeting) void openMeetingDetail(meeting);
+      return;
+    }
+
+    if (event.projectId) {
+      setSelectedProjectId(event.projectId);
+    }
+  }
 
   async function signIn(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1490,6 +1628,79 @@ function App() {
               </article>
             ))}
             {announcements.length === 0 && loadState !== "loading" ? <p className="empty">目前沒有公告。</p> : null}
+          </div>
+        </div>
+
+        <div className="panel panel--wide">
+          <div className="panel-heading">
+            <CalendarDays size={18} />
+            <h2>行事曆</h2>
+            <div className="calendar-controls">
+              <button className="icon-button" type="button" onClick={() => shiftCalendarMonth(-1)} title="上一月" aria-label="上一月">
+                <ChevronLeft size={16} />
+              </button>
+              <strong>{calendarData.title}</strong>
+              <button className="icon-button" type="button" onClick={() => shiftCalendarMonth(1)} title="下一月" aria-label="下一月">
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+
+          <section className="rotary-theme-card">
+            <div>
+              <span>{calendarMonth.getMonth() + 1} 月扶輪主題月</span>
+              <strong>{calendarData.theme.zh}</strong>
+            </div>
+            <p>{calendarData.theme.en}</p>
+          </section>
+
+          <div className="calendar-layout">
+            <div className="calendar-grid" aria-label={`${calendarData.title} 行事曆`}>
+              {weekdayLabels.map((weekday) => (
+                <span className="calendar-weekday" key={weekday}>
+                  {weekday}
+                </span>
+              ))}
+              {calendarData.cells.map((cell) => (
+                <div className={cell.isCurrentMonth ? "calendar-day" : "calendar-day calendar-day--muted"} key={cell.dateKey}>
+                  <span className="calendar-date">{cell.date.getDate()}</span>
+                  <div className="calendar-day-events">
+                    {cell.events.slice(0, 3).map((event) => (
+                      <button
+                        className={`calendar-event calendar-event--${event.kind}`}
+                        type="button"
+                        onClick={() => openCalendarEvent(event)}
+                        key={event.id}
+                        title={`${event.label}：${event.title}`}
+                      >
+                        <span>{event.label}</span>
+                        <strong>{event.title}</strong>
+                      </button>
+                    ))}
+                    {cell.events.length > 3 ? <span className="calendar-more">+{cell.events.length - 3}</span> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <aside className="calendar-agenda">
+              <h3>本月重點</h3>
+              {calendarData.monthEvents.length > 0 ? (
+                <div className="calendar-agenda-list">
+                  {calendarData.monthEvents.slice(0, 8).map((event) => (
+                    <button className="calendar-agenda-item" type="button" onClick={() => openCalendarEvent(event)} key={event.id}>
+                      <span>{formatMonthDay(toLocalDate(event.date) ?? new Date())}</span>
+                      <div>
+                        <strong>{event.title}</strong>
+                        <p>{event.label}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="empty">本月尚無專案、任務或會議排程。</p>
+              )}
+            </aside>
           </div>
         </div>
 
