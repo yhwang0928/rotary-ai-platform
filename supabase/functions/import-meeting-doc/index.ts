@@ -21,6 +21,12 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+function appendCacheBuster(candidate: string) {
+  const url = new URL(candidate);
+  url.searchParams.set("_sync", String(Date.now()));
+  return url.toString();
+}
+
 function extractGoogleDocCandidates(sourceUrl: string) {
   const url = new URL(sourceUrl);
   if (url.hostname !== "docs.google.com") {
@@ -76,9 +82,11 @@ Deno.serve(async (req) => {
     let lastStatus = 0;
 
     for (const candidate of candidates) {
-      const response = await fetch(candidate, {
+      const response = await fetch(appendCacheBuster(candidate), {
         redirect: "follow",
         headers: {
+          "Cache-Control": "no-cache",
+          "Pragma": "no-cache",
           "User-Agent": "rotary-ai-platform/1.0",
         },
       });

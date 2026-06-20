@@ -567,6 +567,9 @@ function App() {
       meeting,
       decisions: (decisionsResult.data ?? []) as MeetingDecision[],
     });
+    if (meeting.notes_doc_url) {
+      void importMeetingDoc(meeting);
+    }
   }
 
   async function addMeeting() {
@@ -1274,14 +1277,14 @@ function App() {
               ) : null}
               {selectedMeeting.notes_doc_url ? (
                 <button
-                  className="icon-button"
+                  className="btn-add"
                   type="button"
                   onClick={() => importMeetingDoc(selectedMeeting)}
-                  title="從 Google Doc 匯入"
-                  aria-label="從 Google Doc 匯入"
+                  title="同步 Google Doc"
+                  aria-label="同步 Google Doc"
                   disabled={importingMeetingId === selectedMeeting.id}
                 >
-                  <FileDown size={16} />
+                  <FileDown size={14} /> 同步 Google Doc
                 </button>
               ) : null}
               {meetingEditActions(selectedMeeting)}
