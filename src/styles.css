@@ -736,6 +736,46 @@ h4 {
 
 .btn-add:hover { background: var(--gold-dim); }
 
+/* ── Drive Panel ── */
+.drive-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.drive-actions a {
+  text-decoration: none;
+}
+
+.drive-upload-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.drive-upload-button input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.drive-panel {
+  margin-top: 16px;
+  overflow: hidden;
+  border: 1px solid var(--gold-border);
+  border-radius: 8px;
+  background: var(--blue-card);
+}
+
+.drive-panel iframe {
+  display: block;
+  width: 100%;
+  min-height: 420px;
+  border: 0;
+  background: #ffffff;
+}
+
 /* ── List ── */
 .list { display: grid; gap: 0; }
 
@@ -1360,6 +1400,12 @@ h4 {
     border-right: 0;
   }
   .calendar-day--muted { display: none; }
+  .drive-actions {
+    width: 100%;
+    justify-content: flex-end;
+    margin-left: 0;
+  }
+  .drive-panel iframe { min-height: 360px; }
   .gantt-chart { min-width: 680px; }
   .gantt-axis, .gantt-row { grid-template-columns: 180px minmax(0,1fr); gap: 10px; }
   .action-items-table__head, .action-items-table__row { grid-template-columns: 2fr 1.2fr 0.8fr; }

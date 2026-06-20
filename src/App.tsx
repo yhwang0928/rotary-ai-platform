@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FolderKanban, LogOut, Megaphone, Pencil, Plus, Save, X } from "lucide-react";
+import { ArrowLeft, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FolderKanban, HardDrive, LogOut, Megaphone, Pencil, Plus, Save, Upload, X } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { StatCard } from "./components/StatCard";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
@@ -67,6 +67,9 @@ type NewCalendarEventState = {
 
 const APP_NAME = "3481 Rotary AI專案管理平台";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const DRIVE_FOLDER_ID = "1fybSLObkJjwR4znh53tHQDEGHO5025XI";
+const DRIVE_FOLDER_URL = `https://drive.google.com/drive/u/3/folders/${DRIVE_FOLDER_ID}`;
+const DRIVE_FOLDER_EMBED_URL = `https://drive.google.com/embeddedfolderview?id=${DRIVE_FOLDER_ID}#list`;
 const weekdayLabels = ["日", "一", "二", "三", "四", "五", "六"];
 const rotaryMonthlyThemes: Record<number, { zh: string; en: string }> = {
   0: { zh: "職業服務月", en: "Vocational Service" },
@@ -735,6 +738,13 @@ function App() {
 
     setCalendarEvents((current) => current.filter((event) => event.id !== id));
     setSaveMessage("已刪除行事曆內容。");
+  }
+
+  function handleDriveUploadSelection(event: React.ChangeEvent<HTMLInputElement>) {
+    const fileName = event.target.files?.[0]?.name;
+    event.target.value = "";
+    window.open(DRIVE_FOLDER_URL, "_blank", "noopener,noreferrer");
+    setSaveMessage(fileName ? `請在 Google Drive 資料夾中完成上傳：${fileName}` : "請在 Google Drive 資料夾中完成上傳。");
   }
 
   function startEdit(kind: EditKind, item: { id: string } & object) {
@@ -2115,6 +2125,29 @@ function App() {
               </article>
             ))}
             {meetings.length === 0 && loadState !== "loading" ? <p className="empty">目前沒有會議紀錄。</p> : null}
+          </div>
+        </div>
+
+        <div className="panel panel--wide">
+          <div className="panel-heading">
+            <HardDrive size={18} />
+            <h2>Google Drive 檔案</h2>
+            <div className="drive-actions">
+              <a className="btn-add" href={DRIVE_FOLDER_URL} target="_blank" rel="noreferrer">
+                <ExternalLink size={14} /> 開啟資料夾
+              </a>
+              <label className="btn-add drive-upload-button">
+                <Upload size={14} /> 新增上傳檔案
+                <input type="file" onChange={handleDriveUploadSelection} />
+              </label>
+            </div>
+          </div>
+          <div className="drive-panel">
+            <iframe
+              title="3481 AI 委員會 Google Drive 資料夾"
+              src={DRIVE_FOLDER_EMBED_URL}
+              loading="lazy"
+            />
           </div>
         </div>
 
