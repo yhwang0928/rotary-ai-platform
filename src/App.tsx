@@ -36,10 +36,14 @@ type EditingState = {
 type NewProjectState = {
   name: string;
   slug: string;
-  description: string;
+  project_purpose: string;
+  project_background: string;
   status: string;
+  owner_names: string;
+  participating_units: string;
   start_date: string;
   expected_end_date: string;
+  budget_range: string;
   google_drive_folder_url: string;
   drive_folder_label: string;
   drive_folder_purpose: string;
@@ -115,10 +119,14 @@ const priorityOptions = Object.entries(priorityLabels);
 const emptyNewProject: NewProjectState = {
   name: "",
   slug: "",
-  description: "",
+  project_purpose: "",
+  project_background: "",
   status: "active",
+  owner_names: "",
+  participating_units: "",
   start_date: "",
   expected_end_date: "",
+  budget_range: "",
   google_drive_folder_url: "",
   drive_folder_label: "",
   drive_folder_purpose: "",
@@ -257,7 +265,7 @@ function App() {
       const [projectResult, taskResult, meetingResult, announcementResult, calendarEventResult] = await Promise.all([
         supabase
           .from("projects")
-          .select("id,name,slug,description,status,start_date,expected_end_date,google_drive_folder_url,drive_folder_label,drive_folder_purpose,updated_at")
+          .select("id,name,slug,description,status,owner_names,project_purpose,project_background,participating_units,start_date,expected_end_date,budget_range,google_drive_folder_url,drive_folder_label,drive_folder_purpose,updated_at")
           .order("name"),
         supabase
           .from("tasks")
@@ -888,10 +896,15 @@ function App() {
     const payload = {
       name,
       slug,
-      description: nullable(newProject.description),
+      description: nullable(newProject.project_purpose),
       status: newProject.status,
+      owner_names: nullable(newProject.owner_names),
+      project_purpose: nullable(newProject.project_purpose),
+      project_background: nullable(newProject.project_background),
+      participating_units: nullable(newProject.participating_units),
       start_date: nullable(newProject.start_date),
       expected_end_date: nullable(newProject.expected_end_date),
+      budget_range: nullable(newProject.budget_range),
       google_drive_folder_url: nullable(newProject.google_drive_folder_url),
       drive_folder_label: nullable(newProject.drive_folder_label),
       drive_folder_purpose: nullable(newProject.drive_folder_purpose),
@@ -899,7 +912,7 @@ function App() {
     const { data, error } = await supabase
       .from("projects")
       .insert(payload)
-      .select("id,name,slug,description,status,start_date,expected_end_date,google_drive_folder_url,drive_folder_label,drive_folder_purpose,updated_at")
+      .select("id,name,slug,description,status,owner_names,project_purpose,project_background,participating_units,start_date,expected_end_date,budget_range,google_drive_folder_url,drive_folder_label,drive_folder_purpose,updated_at")
       .single();
 
     if (error) {
@@ -922,10 +935,15 @@ function App() {
     const payloadByKind: Record<EditKind, Record<string, string | null>> = {
       project: {
         name: nullable(values.name),
-        description: nullable(values.description),
+        description: nullable(values.project_purpose),
         status: values.status,
+        owner_names: nullable(values.owner_names),
+        project_purpose: nullable(values.project_purpose),
+        project_background: nullable(values.project_background),
+        participating_units: nullable(values.participating_units),
         start_date: nullable(values.start_date),
         expected_end_date: nullable(values.expected_end_date),
+        budget_range: nullable(values.budget_range),
         google_drive_folder_url: nullable(values.google_drive_folder_url),
         drive_folder_label: nullable(values.drive_folder_label),
         drive_folder_purpose: nullable(values.drive_folder_purpose),
@@ -959,7 +977,7 @@ function App() {
           "projects",
           id,
           payloadByKind.project,
-          "id,name,slug,description,status,start_date,expected_end_date,google_drive_folder_url,drive_folder_label,drive_folder_purpose,updated_at",
+          "id,name,slug,description,status,owner_names,project_purpose,project_background,participating_units,start_date,expected_end_date,budget_range,google_drive_folder_url,drive_folder_label,drive_folder_purpose,updated_at",
         );
 
         setProjects((items) => items.map((item) => (item.id === id ? updatedProject : item)));
@@ -1247,9 +1265,6 @@ function App() {
   const selectedProjectTasks = selectedProject
     ? tasks.filter((task) => task.project_id === selectedProject.id)
     : [];
-  const selectedProjectMeetings = selectedProject
-    ? meetings.filter((meeting) => meeting.project_id === selectedProject.id)
-    : [];
   const selectedMeeting =
     selectedMeetingId && meetingDetail?.meeting.id === selectedMeetingId
       ? meetingDetail.meeting
@@ -1420,14 +1435,9 @@ function App() {
             <div>
               <p className="eyebrow">專案詳情</p>
               <h2>{selectedProject.name}</h2>
-              <p>{selectedProject.description ?? "尚未填寫專案說明。"}</p>
+              <p>{selectedProject.project_purpose ?? selectedProject.description ?? "尚未填寫專案目的。"}</p>
             </div>
             <div className="row-actions">
-              {selectedProject.google_drive_folder_url ? (
-                <a href={selectedProject.google_drive_folder_url} target="_blank" rel="noreferrer" title="開啟雲端硬碟資料夾">
-                  <ExternalLink size={16} />
-                </a>
-              ) : null}
               {editActions("project", selectedProject)}
             </div>
           </div>
@@ -1436,33 +1446,33 @@ function App() {
             <section className="panel">
               <div className="edit-grid">
                 {editInput("name", "專案名稱")}
-                {editSelect("status", "狀態", projectStatusOptions)}
-                {editInput("start_date", "開始時間", "date")}
-                {editInput("expected_end_date", "期望結束時間", "date")}
-                {editTextarea("description", "說明")}
-                {editInput("google_drive_folder_url", "Google Drive 連結")}
-                {editInput("drive_folder_label", "Drive 資料夾")}
-                {editTextarea("drive_folder_purpose", "Drive 用途")}
+                {editTextarea("project_purpose", "專案目的")}
+                {editTextarea("project_background", "專案背景")}
+                {editInput("owner_names", "專案負責人")}
+                {editInput("participating_units", "參與單位")}
+                {editInput("start_date", "預計啟動日期", "date")}
+                {editInput("expected_end_date", "預計完成日期", "date")}
+                {editInput("budget_range", "預算範圍")}
               </div>
             </section>
           ) : null}
 
           <section className="project-detail-grid">
             <article className="detail-card">
-              <span>狀態</span>
-              <strong>{labelFromMap(projectStatusLabels, selectedProject.status)}</strong>
+              <span>專案負責人</span>
+              <strong>{selectedProject.owner_names ?? "未設定"}</strong>
             </article>
             <article className="detail-card">
-              <span>開始時間</span>
+              <span>預計啟動日期</span>
               <strong>{selectedProject.start_date ?? "未設定"}</strong>
             </article>
             <article className="detail-card">
-              <span>期望結束</span>
+              <span>預計完成日期</span>
               <strong>{selectedProject.expected_end_date ?? "未設定"}</strong>
             </article>
             <article className="detail-card">
-              <span>任務數</span>
-              <strong>{selectedProjectTasks.length}</strong>
+              <span>預算範圍</span>
+              <strong>{selectedProject.budget_range ?? "未設定"}</strong>
             </article>
           </section>
 
@@ -1473,20 +1483,36 @@ function App() {
             </div>
             <div className="detail-list">
               <div>
-                <span>英文代碼</span>
-                <strong>{selectedProject.slug}</strong>
+                <span>專案名稱</span>
+                <strong>{selectedProject.name}</strong>
               </div>
               <div>
-                <span>Drive 資料夾</span>
-                <strong>{selectedProject.drive_folder_label ?? "未設定"}</strong>
+                <span>專案目的</span>
+                <p>{selectedProject.project_purpose ?? selectedProject.description ?? "未設定"}</p>
               </div>
               <div>
-                <span>Drive 用途</span>
-                <p>{selectedProject.drive_folder_purpose ?? "未設定"}</p>
+                <span>專案背景</span>
+                <p>{selectedProject.project_background ?? "未設定"}</p>
               </div>
               <div>
-                <span>最後更新</span>
-                <strong>{new Date(selectedProject.updated_at).toLocaleString("zh-TW")}</strong>
+                <span>參與單位</span>
+                <strong>{selectedProject.participating_units ?? "未設定"}</strong>
+              </div>
+              <div>
+                <span>專案負責人</span>
+                <strong>{selectedProject.owner_names ?? "未設定"}</strong>
+              </div>
+              <div>
+                <span>預計啟動日期</span>
+                <strong>{selectedProject.start_date ?? "未設定"}</strong>
+              </div>
+              <div>
+                <span>預計完成日期</span>
+                <strong>{selectedProject.expected_end_date ?? "未設定"}</strong>
+              </div>
+              <div>
+                <span>預算範圍</span>
+                <strong>{selectedProject.budget_range ?? "未設定"}</strong>
               </div>
             </div>
           </section>
@@ -1570,36 +1596,6 @@ function App() {
             </div>
           </section>
 
-          <section className="panel">
-            <div className="panel-heading">
-              <CalendarDays size={18} />
-              <h2>關聯會議</h2>
-            </div>
-            <div className="list">
-              {selectedProjectMeetings.map((meeting) => (
-                <article className="list-row" key={meeting.id}>
-                  <button className="project-title-button" type="button" onClick={() => openMeetingDetail(meeting)}>
-                    <strong>{meeting.title}</strong>
-                    <span>{meeting.meeting_date}</span>
-                    <ChevronDown size={16} />
-                  </button>
-                  <div className="row-actions">
-                    {meeting.google_meet_url ? (
-                      <a href={meeting.google_meet_url} target="_blank" rel="noreferrer" title="開啟 Google Meet">
-                        <ExternalLink size={16} />
-                      </a>
-                    ) : null}
-                    {meeting.notes_doc_url ? (
-                      <a href={meeting.notes_doc_url} target="_blank" rel="noreferrer" title="開啟 Google Doc">
-                        <ExternalLink size={16} />
-                      </a>
-                    ) : null}
-                  </div>
-                </article>
-              ))}
-              {selectedProjectMeetings.length === 0 ? <p className="empty">此專案尚未連結會議。</p> : null}
-            </div>
-          </section>
         </section>
       </main>
     );
@@ -2008,12 +2004,13 @@ function App() {
                     ))}
                   </select>
                 </label>
-                {newProjectInput("start_date", "開始時間", "date")}
-                {newProjectInput("expected_end_date", "期望結束時間", "date")}
-                {newProjectTextarea("description", "說明")}
-                {newProjectInput("google_drive_folder_url", "Google Drive 連結")}
-                {newProjectInput("drive_folder_label", "Drive 資料夾")}
-                {newProjectTextarea("drive_folder_purpose", "Drive 用途")}
+                {newProjectInput("owner_names", "專案負責人")}
+                {newProjectInput("participating_units", "參與單位")}
+                {newProjectInput("start_date", "預計啟動日期", "date")}
+                {newProjectInput("expected_end_date", "預計完成日期", "date")}
+                {newProjectInput("budget_range", "預算範圍")}
+                {newProjectTextarea("project_purpose", "專案目的")}
+                {newProjectTextarea("project_background", "專案背景")}
               </div>
               <div className="form-actions">
                 <button type="button" onClick={addProject}>新增</button>

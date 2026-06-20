@@ -15,6 +15,11 @@ export interface ProjectSummary {
   slug: string;
   description: string | null;
   status: string;
+  owner_names: string | null;
+  project_purpose: string | null;
+  project_background: string | null;
+  participating_units: string | null;
+  budget_range: string | null;
   start_date: string | null;
   expected_end_date: string | null;
   google_drive_folder_url: string | null;
