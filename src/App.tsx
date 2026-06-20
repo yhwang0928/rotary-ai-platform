@@ -1369,16 +1369,6 @@ function App() {
                       </button>
                     ) : null}
                     {meetingEditActions(meeting)}
-                    <button
-                      className="icon-button icon-button--danger"
-                      type="button"
-                      onClick={() => deleteMeeting(meeting.id)}
-                      title="刪除此會議記錄"
-                      aria-label="刪除"
-                      style={{ flexShrink: 0, marginTop: "2px" }}
-                    >
-                      <X size={14} />
-                    </button>
                   </div>
 
                   {isOpen ? (
@@ -1421,6 +1411,17 @@ function App() {
                           {meetingDetail!.decisions.length === 0 ? (
                             <p className="empty">此會議尚未記錄決議。</p>
                           ) : null}
+                          <div className="meeting-detail-actions">
+                            <button
+                              className="icon-button icon-button--danger"
+                              type="button"
+                              onClick={() => deleteMeeting(meeting.id)}
+                              title="刪除此會議記錄"
+                              aria-label="刪除"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
                         </>
                       )}
                     </div>
