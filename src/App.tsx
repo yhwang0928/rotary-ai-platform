@@ -602,11 +602,20 @@ function App() {
   async function deleteMeeting(id: string) {
     if (!supabase) return;
     if (!window.confirm("確定要刪除此會議記錄？此操作無法復原。")) return;
-    const { error } = await supabase.from("meetings").delete().eq("id", id);
-    if (error) { setSaveMessage("刪除失敗。"); return; }
+    const { data, error } = await supabase.from("meetings").delete().eq("id", id).select("id").maybeSingle();
+    if (error) {
+      console.error(error);
+      setSaveMessage("刪除失敗，請確認你有此會議記錄的刪除權限。");
+      return;
+    }
+    if (!data) {
+      setSaveMessage("刪除失敗，資料庫沒有刪除任何會議記錄。");
+      return;
+    }
     setMeetings((prev) => prev.filter((m) => m.id !== id));
     if (meetingDetail?.meeting.id === id) setMeetingDetail(null);
     if (selectedMeetingId === id) setSelectedMeetingId(null);
+    await loadDashboardData(false);
     setSaveMessage("已刪除。");
   }
 
