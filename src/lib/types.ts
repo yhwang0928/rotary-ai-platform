@@ -30,6 +30,17 @@ export interface AnnouncementSummary {
   created_at: string;
 }
 
+export interface CalendarEventSummary {
+  id: string;
+  project_id: string | null;
+  title: string;
+  event_date: string;
+  description: string | null;
+  location: string | null;
+  url: string | null;
+  created_at: string;
+}
+
 export interface TaskSummary {
   id: string;
   project_id: string;

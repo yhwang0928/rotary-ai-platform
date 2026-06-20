@@ -5,6 +5,7 @@ import { StatCard } from "./components/StatCard";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
 import type {
   AnnouncementSummary,
+  CalendarEventSummary,
   MeetingDecision,
   MeetingDetail,
   MeetingSummary,
@@ -16,7 +17,7 @@ import "./styles.css";
 type LoadState = "idle" | "loading" | "ready" | "error";
 type EditKind = "project" | "task" | "meeting";
 type GanttScale = "week" | "month";
-type CalendarEventKind = "project" | "task" | "meeting";
+type CalendarEventKind = "project" | "task" | "meeting" | "custom";
 type CalendarEvent = {
   id: string;
   date: string;
@@ -25,6 +26,7 @@ type CalendarEvent = {
   kind: CalendarEventKind;
   projectId?: string;
   meetingId?: string;
+  calendarEventId?: string;
 };
 type EditingState = {
   kind: EditKind;
@@ -53,6 +55,14 @@ type NewTaskState = {
   collaborator_names: string;
   output_title: string;
   blocker_reason: string;
+};
+type NewCalendarEventState = {
+  title: string;
+  event_date: string;
+  project_id: string;
+  location: string;
+  url: string;
+  description: string;
 };
 
 const APP_NAME = "3481 Rotary AI專案管理平台";
@@ -121,6 +131,14 @@ const emptyNewTask: NewTaskState = {
   collaborator_names: "",
   output_title: "",
   blocker_reason: "",
+};
+const emptyNewCalendarEvent: NewCalendarEventState = {
+  title: "",
+  event_date: "",
+  project_id: "",
+  location: "",
+  url: "",
+  description: "",
 };
 
 function labelFromMap(labels: Record<string, string>, value: string) {
@@ -201,6 +219,7 @@ function App() {
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
   const [meetings, setMeetings] = useState<MeetingSummary[]>([]);
   const [announcements, setAnnouncements] = useState<AnnouncementSummary[]>([]);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEventSummary[]>([]);
   const [editing, setEditing] = useState<EditingState | null>(null);
   const [saveMessage, setSaveMessage] = useState("");
   const [ganttScale, setGanttScale] = useState<GanttScale>("week");
@@ -221,6 +240,8 @@ function App() {
   const [newMeeting, setNewMeeting] = useState({ title: "", meeting_date: "", notes: "", notes_doc_url: "" });
   const [isAddingAnnouncement, setIsAddingAnnouncement] = useState(false);
   const [newAnnouncement, setNewAnnouncement] = useState({ title: "", body: "" });
+  const [isAddingCalendarEvent, setIsAddingCalendarEvent] = useState(false);
+  const [newCalendarEvent, setNewCalendarEvent] = useState<NewCalendarEventState>(emptyNewCalendarEvent);
   const [importingMeetingId, setImportingMeetingId] = useState<string | null>(null);
 
   const loadDashboardData = useCallback(async (showLoading = true) => {
@@ -228,7 +249,7 @@ function App() {
 
     if (showLoading) setLoadState("loading");
     try {
-      const [projectResult, taskResult, meetingResult, announcementResult] = await Promise.all([
+      const [projectResult, taskResult, meetingResult, announcementResult, calendarEventResult] = await Promise.all([
         supabase
           .from("projects")
           .select("id,name,slug,description,status,start_date,expected_end_date,google_drive_folder_url,drive_folder_label,drive_folder_purpose,updated_at")
@@ -247,6 +268,10 @@ function App() {
           .select("id,title,body,created_at")
           .order("created_at", { ascending: false })
           .limit(5),
+        supabase
+          .from("calendar_events")
+          .select("id,project_id,title,event_date,description,location,url,created_at")
+          .order("event_date", { ascending: true }),
       ]);
 
       const firstError =
@@ -258,11 +283,15 @@ function App() {
       if (announcementResult.error) {
         console.warn("Announcements unavailable:", announcementResult.error);
       }
+      if (calendarEventResult.error) {
+        console.warn("Calendar events unavailable:", calendarEventResult.error);
+      }
 
       setProjects(projectResult.data ?? []);
       setTasks(taskResult.data ?? []);
       setMeetings(meetingResult.data ?? []);
       setAnnouncements(announcementResult.error ? [] : announcementResult.data ?? []);
+      setCalendarEvents(calendarEventResult.error ? [] : calendarEventResult.data ?? []);
       setLoadState("ready");
     } catch (error) {
       console.error(error);
@@ -442,6 +471,15 @@ function App() {
         projectId: meeting.project_id ?? undefined,
         meetingId: meeting.id,
       })),
+      ...calendarEvents.map((event) => ({
+        id: `calendar-${event.id}`,
+        date: event.event_date,
+        title: event.title,
+        label: event.location ? `行事曆 · ${event.location}` : "行事曆",
+        kind: "custom" as const,
+        projectId: event.project_id ?? undefined,
+        calendarEventId: event.id,
+      })),
     ];
 
     const events = rawEvents
@@ -475,7 +513,7 @@ function App() {
       cells,
       monthEvents,
     };
-  }, [calendarMonth, meetings, projects, tasks]);
+  }, [calendarEvents, calendarMonth, meetings, projects, tasks]);
 
   function shiftCalendarMonth(offset: number) {
     setCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1));
@@ -509,6 +547,7 @@ function App() {
     setTasks([]);
     setMeetings([]);
     setAnnouncements([]);
+    setCalendarEvents([]);
     setSelectedProjectId(null);
     setSelectedMeetingId(null);
   }
@@ -638,6 +677,52 @@ function App() {
 
     setAnnouncements((current) => current.filter((announcement) => announcement.id !== id));
     setSaveMessage("已刪除公告。");
+  }
+
+  async function addCalendarEvent() {
+    if (!supabase || !newCalendarEvent.title.trim() || !newCalendarEvent.event_date) return;
+
+    setSaveMessage("新增行事曆內容中...");
+    const { data, error } = await supabase
+      .from("calendar_events")
+      .insert({
+        title: newCalendarEvent.title.trim(),
+        event_date: newCalendarEvent.event_date,
+        project_id: nullable(newCalendarEvent.project_id),
+        location: nullable(newCalendarEvent.location),
+        url: nullable(newCalendarEvent.url),
+        description: nullable(newCalendarEvent.description),
+      })
+      .select("id,project_id,title,event_date,description,location,url,created_at")
+      .single();
+
+    if (error) {
+      console.error(error);
+      setSaveMessage("新增行事曆內容失敗，請確認你有權限。");
+      return;
+    }
+
+    setCalendarEvents((current) =>
+      [...current, data as CalendarEventSummary].sort((a, b) => a.event_date.localeCompare(b.event_date)),
+    );
+    setNewCalendarEvent(emptyNewCalendarEvent);
+    setIsAddingCalendarEvent(false);
+    setSaveMessage("已新增行事曆內容。");
+  }
+
+  async function deleteCalendarEvent(id: string) {
+    if (!supabase) return;
+    if (!window.confirm("確定要刪除此行事曆內容？")) return;
+
+    const { error } = await supabase.from("calendar_events").delete().eq("id", id);
+    if (error) {
+      console.error(error);
+      setSaveMessage("刪除行事曆內容失敗，只有建立者或管理員可以刪除。");
+      return;
+    }
+
+    setCalendarEvents((current) => current.filter((event) => event.id !== id));
+    setSaveMessage("已刪除行事曆內容。");
   }
 
   function startEdit(kind: EditKind, item: { id: string } & object) {
@@ -1635,6 +1720,15 @@ function App() {
           <div className="panel-heading">
             <CalendarDays size={18} />
             <h2>行事曆</h2>
+            <button
+              className="icon-button panel-action"
+              type="button"
+              onClick={() => setIsAddingCalendarEvent((current) => !current)}
+              title="新增行事曆內容"
+              aria-label="新增行事曆內容"
+            >
+              <Plus size={16} />
+            </button>
             <div className="calendar-controls">
               <button className="icon-button" type="button" onClick={() => shiftCalendarMonth(-1)} title="上一月" aria-label="上一月">
                 <ChevronLeft size={16} />
@@ -1653,6 +1747,82 @@ function App() {
             </div>
             <p>{calendarData.theme.en}</p>
           </section>
+
+          {isAddingCalendarEvent ? (
+            <div className="add-project-form">
+              <div className="edit-grid">
+                <label>
+                  標題
+                  <input
+                    type="text"
+                    value={newCalendarEvent.title}
+                    onChange={(event) => setNewCalendarEvent((current) => ({ ...current, title: event.target.value }))}
+                    placeholder="例：社務會議、講座、截止日"
+                  />
+                </label>
+                <label>
+                  日期
+                  <input
+                    type="date"
+                    value={newCalendarEvent.event_date}
+                    onChange={(event) => setNewCalendarEvent((current) => ({ ...current, event_date: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  關聯專案
+                  <select
+                    value={newCalendarEvent.project_id}
+                    onChange={(event) => setNewCalendarEvent((current) => ({ ...current, project_id: event.target.value }))}
+                  >
+                    <option value="">不關聯專案</option>
+                    {projects.map((project) => (
+                      <option value={project.id} key={project.id}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  地點
+                  <input
+                    type="text"
+                    value={newCalendarEvent.location}
+                    onChange={(event) => setNewCalendarEvent((current) => ({ ...current, location: event.target.value }))}
+                    placeholder="選填"
+                  />
+                </label>
+                <label style={{ gridColumn: "1 / -1" }}>
+                  連結
+                  <input
+                    type="url"
+                    value={newCalendarEvent.url}
+                    onChange={(event) => setNewCalendarEvent((current) => ({ ...current, url: event.target.value }))}
+                    placeholder="https://..."
+                  />
+                </label>
+                <label style={{ gridColumn: "1 / -1" }}>
+                  說明
+                  <textarea
+                    value={newCalendarEvent.description}
+                    onChange={(event) => setNewCalendarEvent((current) => ({ ...current, description: event.target.value }))}
+                    placeholder="選填"
+                  />
+                </label>
+              </div>
+              <div className="form-actions">
+                <button type="button" onClick={addCalendarEvent}>新增</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsAddingCalendarEvent(false);
+                    setNewCalendarEvent(emptyNewCalendarEvent);
+                  }}
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           <div className="calendar-layout">
             <div className="calendar-grid" aria-label={`${calendarData.title} 行事曆`}>
@@ -1687,15 +1857,40 @@ function App() {
               <h3>本月重點</h3>
               {calendarData.monthEvents.length > 0 ? (
                 <div className="calendar-agenda-list">
-                  {calendarData.monthEvents.slice(0, 8).map((event) => (
-                    <button className="calendar-agenda-item" type="button" onClick={() => openCalendarEvent(event)} key={event.id}>
-                      <span>{formatMonthDay(toLocalDate(event.date) ?? new Date())}</span>
-                      <div>
-                        <strong>{event.title}</strong>
-                        <p>{event.label}</p>
+                  {calendarData.monthEvents.slice(0, 8).map((event) => {
+                    const customEvent = event.calendarEventId
+                      ? calendarEvents.find((item) => item.id === event.calendarEventId) ?? null
+                      : null;
+
+                    return (
+                      <div className="calendar-agenda-row" key={event.id}>
+                        <button className="calendar-agenda-item" type="button" onClick={() => openCalendarEvent(event)}>
+                          <span>{formatMonthDay(toLocalDate(event.date) ?? new Date())}</span>
+                          <div>
+                            <strong>{event.title}</strong>
+                            <p>{customEvent?.description ?? event.label}</p>
+                            {customEvent?.location ? <p>{customEvent.location}</p> : null}
+                          </div>
+                        </button>
+                        {customEvent?.url ? (
+                          <a href={customEvent.url} target="_blank" rel="noreferrer" title="開啟連結" aria-label="開啟連結">
+                            <ExternalLink size={15} />
+                          </a>
+                        ) : null}
+                        {customEvent ? (
+                          <button
+                            className="icon-button icon-button--danger"
+                            type="button"
+                            onClick={() => deleteCalendarEvent(customEvent.id)}
+                            title="刪除行事曆內容"
+                            aria-label="刪除行事曆內容"
+                          >
+                            <X size={13} />
+                          </button>
+                        ) : null}
                       </div>
-                    </button>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="empty">本月尚無專案、任務或會議排程。</p>
