@@ -1720,23 +1720,25 @@ function App() {
           <div className="panel-heading">
             <CalendarDays size={18} />
             <h2>行事曆</h2>
-            <button
-              className="icon-button panel-action"
-              type="button"
-              onClick={() => setIsAddingCalendarEvent((current) => !current)}
-              title="新增行事曆內容"
-              aria-label="新增行事曆內容"
-            >
-              <Plus size={16} />
-            </button>
-            <div className="calendar-controls">
-              <button className="icon-button" type="button" onClick={() => shiftCalendarMonth(-1)} title="上一月" aria-label="上一月">
-                <ChevronLeft size={16} />
+            <div className="calendar-heading-actions">
+              <button
+                className="icon-button"
+                type="button"
+                onClick={() => setIsAddingCalendarEvent((current) => !current)}
+                title="新增行事曆內容"
+                aria-label="新增行事曆內容"
+              >
+                <Plus size={16} />
               </button>
-              <strong>{calendarData.title}</strong>
-              <button className="icon-button" type="button" onClick={() => shiftCalendarMonth(1)} title="下一月" aria-label="下一月">
-                <ChevronRight size={16} />
-              </button>
+              <div className="calendar-controls">
+                <button className="icon-button" type="button" onClick={() => shiftCalendarMonth(-1)} title="上一月" aria-label="上一月">
+                  <ChevronLeft size={16} />
+                </button>
+                <strong>{calendarData.title}</strong>
+                <button className="icon-button" type="button" onClick={() => shiftCalendarMonth(1)} title="下一月" aria-label="下一月">
+                  <ChevronRight size={16} />
+                </button>
+              </div>
             </div>
           </div>
 

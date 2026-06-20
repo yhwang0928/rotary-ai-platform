@@ -448,11 +448,17 @@ h4 {
 .panel-action { margin-left: auto; }
 
 /* ── Calendar ── */
-.calendar-controls {
+.calendar-heading-actions {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   margin-left: auto;
+}
+
+.calendar-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .calendar-controls strong {
@@ -1339,7 +1345,12 @@ h4 {
   .rotary-logo { width: 40px; height: 40px; }
   .task-table__head, .task-table__row { grid-template-columns: minmax(0,1fr); gap: 6px; }
   .edit-grid { grid-template-columns: 1fr; }
-  .calendar-controls { width: 100%; justify-content: space-between; margin-left: 0; }
+  .calendar-heading-actions {
+    width: 100%;
+    justify-content: flex-end;
+    margin-left: 0;
+  }
+  .calendar-controls { justify-content: flex-end; }
   .rotary-theme-card { display: grid; }
   .rotary-theme-card p { text-align: left; }
   .calendar-grid { grid-template-columns: 1fr; }
