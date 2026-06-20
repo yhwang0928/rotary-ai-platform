@@ -373,9 +373,15 @@ function App() {
       .select("id,project_id,title,meeting_date,summary,notes,google_meet_url,notes_doc_url")
       .single();
     if (error) { setSaveMessage("新增失敗。"); return; }
-    setMeetings((prev) => [data as MeetingSummary, ...prev]);
+    const createdMeeting = data as MeetingSummary;
+    setMeetings((prev) => [createdMeeting, ...prev]);
     setNewMeeting({ title: "", meeting_date: "", notes: "", notes_doc_url: "" });
     setIsAddingMeeting(false);
+    if (createdMeeting.notes_doc_url) {
+      const importedMeeting = await importMeetingDoc(createdMeeting);
+      if (importedMeeting) setSaveMessage("已新增並從 Google Doc 匯入完整內容。");
+      return;
+    }
     setSaveMessage("已新增會議記錄。");
   }
 
@@ -391,7 +397,7 @@ function App() {
   }
 
   async function importMeetingDoc(meeting: MeetingSummary) {
-    if (!supabase || !meeting.notes_doc_url) return;
+    if (!supabase || !meeting.notes_doc_url) return null;
 
     setImportingMeetingId(meeting.id);
     setSaveMessage("正在匯入 Google Doc...");
@@ -406,13 +412,13 @@ function App() {
     if (error) {
       console.error(error);
       setSaveMessage("匯入失敗。請確認 Google Doc 已開放連結讀取，或已發布到網路。");
-      return;
+      return null;
     }
 
     const updatedMeeting = (data as { meeting?: MeetingSummary }).meeting;
     if (!updatedMeeting) {
       setSaveMessage("匯入失敗，後端未回傳會議資料。");
-      return;
+      return null;
     }
 
     setMeetings((current) => current.map((item) => (item.id === updatedMeeting.id ? updatedMeeting : item)));
@@ -422,6 +428,7 @@ function App() {
         : current,
     );
     setSaveMessage("已從 Google Doc 匯入會議記錄。");
+    return updatedMeeting;
   }
 
   async function addAnnouncement() {
@@ -619,6 +626,11 @@ function App() {
           current?.meeting.id === id ? { ...current, meeting: updatedMeeting } : current,
         );
         setEditing(null);
+        if (updatedMeeting.notes_doc_url) {
+          const importedMeeting = await importMeetingDoc(updatedMeeting);
+          if (importedMeeting) setSaveMessage("已更新並從 Google Doc 匯入完整內容。");
+          return;
+        }
         return;
       }
 
