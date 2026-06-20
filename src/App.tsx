@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FolderKanban, HardDrive, LogOut, Megaphone, Pencil, Plus, Save, Upload, X } from "lucide-react";
+import { ArrowLeft, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FolderKanban, HardDrive, LogOut, Megaphone, Pencil, Plus, RefreshCw, Save, Upload, X } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { StatCard } from "./components/StatCard";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
@@ -246,6 +246,8 @@ function App() {
   const [isAddingCalendarEvent, setIsAddingCalendarEvent] = useState(false);
   const [newCalendarEvent, setNewCalendarEvent] = useState<NewCalendarEventState>(emptyNewCalendarEvent);
   const [importingMeetingId, setImportingMeetingId] = useState<string | null>(null);
+  const [driveRefreshKey, setDriveRefreshKey] = useState(0);
+  const [driveSyncedAt, setDriveSyncedAt] = useState(() => new Date());
 
   const loadDashboardData = useCallback(async (showLoading = true) => {
     if (!supabase) return;
@@ -745,6 +747,11 @@ function App() {
     event.target.value = "";
     window.open(DRIVE_FOLDER_URL, "_blank", "noopener,noreferrer");
     setSaveMessage(fileName ? `請在 Google Drive 資料夾中完成上傳：${fileName}` : "請在 Google Drive 資料夾中完成上傳。");
+  }
+
+  function syncDriveFolder() {
+    setDriveRefreshKey((current) => current + 1);
+    setDriveSyncedAt(new Date());
   }
 
   function startEdit(kind: EditKind, item: { id: string } & object) {
@@ -2136,6 +2143,9 @@ function App() {
               <a className="btn-add" href={DRIVE_FOLDER_URL} target="_blank" rel="noreferrer">
                 <ExternalLink size={14} /> 開啟資料夾
               </a>
+              <button className="btn-add" type="button" onClick={syncDriveFolder}>
+                <RefreshCw size={14} /> 同步
+              </button>
               <label className="btn-add drive-upload-button">
                 <Upload size={14} /> 新增上傳檔案
                 <input type="file" onChange={handleDriveUploadSelection} />
@@ -2143,7 +2153,12 @@ function App() {
             </div>
           </div>
           <div className="drive-panel">
+            <div className="drive-sync-status">
+              <span>最後同步</span>
+              <strong>{driveSyncedAt.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })}</strong>
+            </div>
             <iframe
+              key={driveRefreshKey}
               title="3481 AI 委員會 Google Drive 資料夾"
               src={DRIVE_FOLDER_EMBED_URL}
               loading="lazy"
