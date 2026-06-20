@@ -1233,6 +1233,8 @@ function App() {
     : null;
   const selectedMeetingDecisions =
     selectedMeetingId && meetingDetail?.meeting.id === selectedMeetingId ? meetingDetail.decisions : [];
+  const visibleSaveMessage =
+    saveMessage && !saveMessage.startsWith("已") ? saveMessage : "";
 
   if (selectedMeeting) {
     return (
@@ -1250,7 +1252,7 @@ function App() {
           </button>
         </header>
 
-        {saveMessage ? <section className="notice">{saveMessage}</section> : null}
+        {visibleSaveMessage ? <section className="notice">{visibleSaveMessage}</section> : null}
 
         <section className="project-page">
           <button className="back-button" type="button" onClick={() => setSelectedMeetingId(null)}>
@@ -1380,7 +1382,7 @@ function App() {
           </button>
         </header>
 
-        {saveMessage ? <section className="notice">{saveMessage}</section> : null}
+        {visibleSaveMessage ? <section className="notice">{visibleSaveMessage}</section> : null}
 
         <section className="project-page">
           <button className="back-button" type="button" onClick={() => setSelectedProjectId(null)}>
@@ -1646,7 +1648,7 @@ function App() {
       {loadState === "error" ? (
         <section className="notice">資料無法載入，請確認 Supabase 權限、RLS 政策與專案成員設定。</section>
       ) : null}
-      {saveMessage ? <section className="notice">{saveMessage}</section> : null}
+      {visibleSaveMessage ? <section className="notice">{visibleSaveMessage}</section> : null}
 
       <section className="content-grid">
         <div className="panel panel--wide">
