@@ -690,7 +690,7 @@ h4 {
 .detail-table__head,
 .detail-table__row {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) 100px 140px 110px;
+  grid-template-columns: minmax(0, 1.6fr) 100px 140px 110px 92px;
   gap: 12px;
   align-items: center;
   border-top: 1px solid var(--white-10);
@@ -712,6 +712,11 @@ h4 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.task-edit-row {
+  grid-column: 1 / -1;
+  padding-top: 8px;
 }
 
 /* ── Meeting ── */

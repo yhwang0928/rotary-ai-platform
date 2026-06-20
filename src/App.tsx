@@ -32,6 +32,18 @@ type NewProjectState = {
   drive_folder_label: string;
   drive_folder_purpose: string;
 };
+type NewTaskState = {
+  title: string;
+  status: TaskSummary["status"];
+  priority: TaskSummary["priority"];
+  start_date: string;
+  due_date: string;
+  completed_date: string;
+  owner_names: string;
+  collaborator_names: string;
+  output_title: string;
+  blocker_reason: string;
+};
 
 const APP_NAME = "3481 Rotary AI專案管理平台";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -54,6 +66,14 @@ const projectStatusLabels: Record<string, string> = {
 };
 
 const projectStatusOptions = Object.entries(projectStatusLabels);
+const taskStatusOptions = Object.entries(taskStatusLabels);
+const priorityLabels: Record<TaskSummary["priority"], string> = {
+  p0: "最高",
+  p1: "高",
+  p2: "一般",
+  p3: "低",
+};
+const priorityOptions = Object.entries(priorityLabels);
 const emptyNewProject: NewProjectState = {
   name: "",
   slug: "",
@@ -64,6 +84,18 @@ const emptyNewProject: NewProjectState = {
   google_drive_folder_url: "",
   drive_folder_label: "",
   drive_folder_purpose: "",
+};
+const emptyNewTask: NewTaskState = {
+  title: "",
+  status: "todo",
+  priority: "p2",
+  start_date: "",
+  due_date: "",
+  completed_date: "",
+  owner_names: "",
+  collaborator_names: "",
+  output_title: "",
+  blocker_reason: "",
 };
 
 function labelFromMap(labels: Record<string, string>, value: string) {
@@ -145,6 +177,8 @@ function App() {
   const [meetingDetailLoading, setMeetingDetailLoading] = useState(false);
   const [isAddingProject, setIsAddingProject] = useState(false);
   const [newProject, setNewProject] = useState<NewProjectState>(emptyNewProject);
+  const [isAddingTask, setIsAddingTask] = useState(false);
+  const [newTask, setNewTask] = useState<NewTaskState>(emptyNewTask);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
   const [kpiModal, setKpiModal] = useState<"total" | "due7" | "overdue" | "blocked" | null>(null);
@@ -515,6 +549,78 @@ function App() {
     setIsAddingProject(false);
   }
 
+  function startAddTask() {
+    setSaveMessage("");
+    setEditing(null);
+    setNewTask(emptyNewTask);
+    setIsAddingTask(true);
+  }
+
+  function cancelAddTask() {
+    setSaveMessage("");
+    setNewTask(emptyNewTask);
+    setIsAddingTask(false);
+  }
+
+  function setNewTaskValue(field: keyof NewTaskState, value: string) {
+    setNewTask((current) => ({
+      ...current,
+      [field]: value,
+      ...(field === "status" && value !== "blocked" ? { blocker_reason: "" } : {}),
+    }));
+  }
+
+  async function addTask(projectId: string) {
+    if (!supabase || !newTask.title.trim()) return;
+
+    setSaveMessage("新增任務中...");
+    const { data, error } = await supabase
+      .from("tasks")
+      .insert({
+        project_id: projectId,
+        title: newTask.title.trim(),
+        status: newTask.status,
+        priority: newTask.priority,
+        start_date: nullable(newTask.start_date),
+        due_date: nullable(newTask.due_date),
+        completed_date: nullable(newTask.completed_date),
+        owner_names: nullable(newTask.owner_names),
+        collaborator_names: nullable(newTask.collaborator_names),
+        output_title: nullable(newTask.output_title),
+        blocker_reason: newTask.status === "blocked" ? nullable(newTask.blocker_reason) : null,
+      })
+      .select("id,project_id,title,status,priority,start_date,due_date,completed_date,blocker_reason,owner_names,collaborator_names,output_title")
+      .single();
+
+    if (error) {
+      console.error(error);
+      setSaveMessage("新增任務失敗，請確認你有專案編輯權限。");
+      return;
+    }
+
+    setTasks((current) => [...current, data as TaskSummary]);
+    setIsAddingTask(false);
+    setNewTask(emptyNewTask);
+    await loadDashboardData(false);
+    setSaveMessage("已新增任務，甘特圖已同步。");
+  }
+
+  async function deleteTask(id: string) {
+    if (!supabase) return;
+    if (!window.confirm("確定要刪除此專案任務？此操作無法復原。")) return;
+
+    const { error } = await supabase.from("tasks").delete().eq("id", id);
+    if (error) {
+      console.error(error);
+      setSaveMessage("刪除任務失敗，請確認你有專案編輯權限。");
+      return;
+    }
+
+    setTasks((current) => current.filter((task) => task.id !== id));
+    await loadDashboardData(false);
+    setSaveMessage("已刪除任務，甘特圖已同步。");
+  }
+
   async function addProject() {
     if (!supabase) return;
 
@@ -749,6 +855,34 @@ function App() {
       <label>
         {label}
         <textarea value={newProject[field]} onChange={(event) => setNewProjectValue(field, event.target.value)} />
+      </label>
+    );
+  }
+
+  function newTaskInput(field: keyof NewTaskState, label: string, type = "text") {
+    const handleInput = (event: React.ChangeEvent<HTMLInputElement>) => {
+      setNewTaskValue(field, event.target.value);
+    };
+
+    return (
+      <label>
+        {label}
+        <input type={type} value={newTask[field]} onChange={handleInput} onInput={handleInput} />
+      </label>
+    );
+  }
+
+  function newTaskSelect(field: keyof NewTaskState, label: string, options: Array<[string, string]>) {
+    return (
+      <label>
+        {label}
+        <select value={newTask[field]} onChange={(event) => setNewTaskValue(field, event.target.value)}>
+          {options.map(([value, labelText]) => (
+            <option value={value} key={value}>
+              {labelText}
+            </option>
+          ))}
+        </select>
       </label>
     );
   }
@@ -1107,13 +1241,37 @@ function App() {
             <div className="panel-heading">
               <CalendarDays size={18} />
               <h2>專案任務</h2>
+              <button className="icon-button panel-action" type="button" onClick={startAddTask} title="新增任務" aria-label="新增任務">
+                <Plus size={16} />
+              </button>
             </div>
+            {isAddingTask ? (
+              <div className="add-project-form">
+                <div className="edit-grid">
+                  {newTaskInput("title", "任務標題")}
+                  {newTaskSelect("status", "狀態", taskStatusOptions)}
+                  {newTaskSelect("priority", "優先級", priorityOptions)}
+                  {newTaskInput("start_date", "開始時間", "date")}
+                  {newTaskInput("due_date", "期限", "date")}
+                  {newTaskInput("completed_date", "完成時間", "date")}
+                  {newTaskInput("owner_names", "負責人")}
+                  {newTaskInput("collaborator_names", "協作者")}
+                  {newTaskInput("output_title", "產出")}
+                  {newTask.status === "blocked" ? newTaskInput("blocker_reason", "受阻原因") : null}
+                </div>
+                <div className="form-actions">
+                  <button type="button" onClick={() => addTask(selectedProject.id)}>新增</button>
+                  <button type="button" onClick={cancelAddTask}>取消</button>
+                </div>
+              </div>
+            ) : null}
             <div className="detail-table">
               <div className="detail-table__head">
                 <span>任務</span>
                 <span>狀態</span>
                 <span>負責人</span>
                 <span>期限</span>
+                <span>操作</span>
               </div>
               {selectedProjectTasks.map((task) => (
                 <div className="detail-table__row" key={task.id}>
@@ -1124,6 +1282,34 @@ function App() {
                   <span>{taskStatusLabels[task.status]}</span>
                   <span>{task.owner_names ?? "未指派"}</span>
                   <span>{task.due_date ?? "未設定"}</span>
+                  <span className="row-actions">
+                    {editActions("task", task)}
+                    <button
+                      className="icon-button icon-button--danger"
+                      type="button"
+                      onClick={() => deleteTask(task.id)}
+                      title="刪除此任務"
+                      aria-label="刪除任務"
+                    >
+                      <X size={14} />
+                    </button>
+                  </span>
+                  {isEditing("task", task.id) ? (
+                    <div className="task-edit-row">
+                      <div className="edit-grid">
+                        {editInput("title", "任務標題")}
+                        {editSelect("status", "狀態", taskStatusOptions)}
+                        {editSelect("priority", "優先級", priorityOptions)}
+                        {editInput("start_date", "開始時間", "date")}
+                        {editInput("due_date", "期限", "date")}
+                        {editInput("completed_date", "完成時間", "date")}
+                        {editInput("owner_names", "負責人")}
+                        {editInput("collaborator_names", "協作者")}
+                        {editInput("output_title", "產出")}
+                        {editing?.values.status === "blocked" ? editInput("blocker_reason", "受阻原因") : null}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ))}
               {selectedProjectTasks.length === 0 ? <p className="empty">此專案尚未建立任務。</p> : null}
