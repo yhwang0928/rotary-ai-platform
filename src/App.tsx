@@ -75,6 +75,7 @@ const DRIVE_FOLDER_ID = "1fybSLObkJjwR4znh53tHQDEGHO5025XI";
 const DRIVE_FOLDER_URL = `https://drive.google.com/drive/u/3/folders/${DRIVE_FOLDER_ID}`;
 const DRIVE_FOLDER_EMBED_URL = `https://drive.google.com/embeddedfolderview?id=${DRIVE_FOLDER_ID}#list`;
 const weekdayLabels = ["日", "一", "二", "三", "四", "五", "六"];
+const FORMATTED_MEETING_NOTES_PREFIX = "<!-- rotary-meeting-html-v1 -->";
 const rotaryMonthlyThemes: Record<number, { zh: string; en: string }> = {
   0: { zh: "職業服務月", en: "Vocational Service" },
   1: { zh: "和平建立與衝突預防月", en: "Peacebuilding and Conflict Prevention" },
@@ -176,6 +177,30 @@ function formatDateKey(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function getFormattedMeetingHtml(notes: string | null) {
+  if (!notes?.startsWith(FORMATTED_MEETING_NOTES_PREFIX)) return null;
+  return notes.slice(FORMATTED_MEETING_NOTES_PREFIX.length).trim();
+}
+
+function getMeetingPreview(notes: string | null) {
+  if (!notes) return "";
+  const formattedHtml = getFormattedMeetingHtml(notes);
+  if (!formattedHtml) return notes;
+
+  return formattedHtml
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function nullable(value: string | null | undefined) {
@@ -1269,6 +1294,7 @@ function App() {
     selectedMeetingId && meetingDetail?.meeting.id === selectedMeetingId
       ? meetingDetail.meeting
       : meetings.find((meeting) => meeting.id === selectedMeetingId) ?? null;
+  const selectedMeetingNotesHtml = selectedMeeting ? getFormattedMeetingHtml(selectedMeeting.notes) : null;
   const selectedMeetingProject = selectedMeeting?.project_id
     ? projects.find((project) => project.id === selectedMeeting.project_id) ?? null
     : null;
@@ -1383,7 +1409,14 @@ function App() {
               <p className="empty">載入中...</p>
             ) : selectedMeeting.notes || selectedMeetingDecisions.length > 0 ? (
               <div className="meeting-original-content">
-                {selectedMeeting.notes ? <pre className="meeting-notes meeting-notes--full">{selectedMeeting.notes}</pre> : null}
+                {selectedMeetingNotesHtml ? (
+                  <div
+                    className="meeting-notes meeting-notes--full meeting-notes--formatted"
+                    dangerouslySetInnerHTML={{ __html: selectedMeetingNotesHtml }}
+                  />
+                ) : selectedMeeting.notes ? (
+                  <pre className="meeting-notes meeting-notes--full">{selectedMeeting.notes}</pre>
+                ) : null}
                 {selectedMeetingDecisions.length > 0 ? (
                   <div className="meeting-original-decisions">
                     <h4>會議決議</h4>
@@ -2110,7 +2143,7 @@ function App() {
                   <div className="meeting-row-meta">
                     <span className="meeting-title">{meeting.title}</span>
                     <span className="meeting-date">{meeting.meeting_date}</span>
-                    {meeting.notes ? <pre className="meeting-notes meeting-notes--preview">{meeting.notes}</pre> : null}
+                    {meeting.notes ? <pre className="meeting-notes meeting-notes--preview">{getMeetingPreview(meeting.notes)}</pre> : null}
                   </div>
                   <div className="row-actions">
                     {meeting.google_meet_url ? (
