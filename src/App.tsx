@@ -243,6 +243,28 @@ function getFormattedMeetingHtml(notes: string | null) {
   return notes.slice(FORMATTED_MEETING_NOTES_PREFIX.length).trim();
 }
 
+function getEditableMeetingNotes(notes: string | null) {
+  if (!notes) return "";
+  return notes
+    .replace(FORMATTED_MEETING_NOTES_PREFIX, "")
+    .replace(STRUCTURED_MEETING_RECORD_PREFIX, "")
+    .trim();
+}
+
+function normalizeMeetingNotesForSave(value: string | null | undefined, originalNotes: string | null | undefined) {
+  const content = value?.trim();
+  if (!content) return null;
+  const formatted = originalNotes?.startsWith(FORMATTED_MEETING_NOTES_PREFIX) || /<\/?[a-z][\s\S]*>/i.test(content);
+  if (!formatted) return content;
+
+  const structured = originalNotes?.includes(STRUCTURED_MEETING_RECORD_PREFIX);
+  const body = content
+    .replace(FORMATTED_MEETING_NOTES_PREFIX, "")
+    .replace(STRUCTURED_MEETING_RECORD_PREFIX, "")
+    .trim();
+  return `${FORMATTED_MEETING_NOTES_PREFIX}\n${structured ? `${STRUCTURED_MEETING_RECORD_PREFIX}\n` : ""}${body}`;
+}
+
 function escapeHtml(value: string) {
   return value
     .replace(/&/g, "&amp;")
@@ -875,7 +897,11 @@ function App() {
     setMeetingDetail((current) =>
       current?.meeting.id === meeting.id ? current : { meeting, decisions: [] },
     );
-    startEdit("meeting", meeting);
+    const editableMeeting: MeetingSummary = {
+      ...meeting,
+      notes: getEditableMeetingNotes(meeting.notes),
+    };
+    startEdit("meeting", editableMeeting);
   }
 
   function cancelEdit() {
@@ -1087,6 +1113,9 @@ function App() {
 
     setSaveMessage("儲存中...");
     const { kind, id, values } = editing;
+    const originalMeeting = kind === "meeting"
+      ? meetings.find((meeting) => meeting.id === id) ?? meetingDetail?.meeting ?? null
+      : null;
     const payloadByKind: Record<EditKind, Record<string, string | null>> = {
       project: {
         name: nullable(values.name),
@@ -1119,7 +1148,7 @@ function App() {
         title: nullable(values.title),
         meeting_date: nullable(values.meeting_date),
         summary: nullable(values.summary),
-        notes: nullable(values.notes),
+        notes: normalizeMeetingNotesForSave(values.notes, originalMeeting?.notes),
         google_meet_url: nullable(values.google_meet_url),
         notes_doc_url: nullable(values.notes_doc_url),
       },
@@ -1157,11 +1186,6 @@ function App() {
           current?.meeting.id === id ? { ...current, meeting: updatedMeeting } : current,
         );
         setEditing(null);
-        if (updatedMeeting.notes_doc_url) {
-          const importedMeeting = await importMeetingDoc(updatedMeeting);
-          if (importedMeeting) setSaveMessage("已更新並從 Google Doc 匯入完整內容。");
-          return;
-        }
         return;
       }
 
@@ -1539,7 +1563,7 @@ function App() {
                 {editInput("meeting_date", "會議日期", "date")}
                 {editInput("google_meet_url", "Google Meet 連結")}
                 {editInput("notes_doc_url", "Google Doc 連結")}
-                {editTextarea("notes", "完整會議內容")}
+                {editTextarea("notes", "完整會議內容（可編輯全部文字與表格 HTML）")}
               </div>
             </section>
           ) : null}
