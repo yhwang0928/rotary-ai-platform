@@ -1232,9 +1232,12 @@ h4 {
 .add-meeting-form {
   border-top: 1px solid var(--gold-border);
   margin-top: 12px;
-  padding-top: 16px;
+  padding: 20px;
   display: grid;
-  gap: 16px;
+  gap: 20px;
+  background: var(--blue-panel);
+  border-radius: 10px;
+  color: var(--text-main);
 }
 
 .add-meeting-form .form-actions { margin-top: 4px; }
@@ -1242,6 +1245,14 @@ h4 {
 .meeting-form-section {
   display: grid;
   gap: 10px;
+}
+
+.meeting-form-section > h3,
+.meeting-form-section > h4 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--gold);
 }
 
 .meeting-form-section__head,
@@ -1252,9 +1263,13 @@ h4 {
   gap: 12px;
 }
 
+.meeting-form-section__head h3,
 .meeting-form-section__head h4,
-.meeting-form-card__head strong {
+.meeting-form-card__head span {
   margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--gold);
 }
 
 .meeting-form-list {
@@ -1268,12 +1283,14 @@ h4 {
   border: 1px solid var(--gold-border);
   border-radius: 8px;
   padding: 12px;
-  background: var(--white-06);
+  background: var(--blue-card);
 }
 
-.meeting-form-card__head strong {
-  color: var(--gold-light);
+.meeting-form-card__head strong,
+.meeting-form-card__head span {
+  color: var(--gold);
   font-size: 0.86rem;
+  font-weight: 600;
 }
 
 .meeting-todo-grid {
