@@ -894,6 +894,7 @@ function App() {
   }
 
   function startMeetingEdit(meeting: MeetingSummary) {
+    setSelectedMeetingId(meeting.id);
     setMeetingDetail((current) =>
       current?.meeting.id === meeting.id ? current : { meeting, decisions: [] },
     );
@@ -2401,12 +2402,20 @@ function App() {
             <div className="list meeting-record-list">
               {platformMeetingRecords.map((meeting) => (
                 <article className="list-row--meeting" key={meeting.id}>
-                  <button
+                  <div
                     className="meeting-row-header"
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     onClick={() => {
                       setSelectedMeetingId(meeting.id);
                       setMeetingDetail({ meeting, decisions: [] });
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedMeetingId(meeting.id);
+                        setMeetingDetail({ meeting, decisions: [] });
+                      }
                     }}
                   >
                     <div className="meeting-row-meta">
@@ -2445,7 +2454,7 @@ function App() {
                       </button>
                       <ChevronDown size={16} style={{ color: "var(--text-muted)" }} />
                     </div>
-                  </button>
+                  </div>
                 </article>
               ))}
             </div>
