@@ -6,7 +6,6 @@ import { isSupabaseConfigured, supabase } from "./lib/supabase";
 import type {
   AnnouncementSummary,
   CalendarEventSummary,
-  MeetingDecision,
   MeetingDetail,
   MeetingSummary,
   ProjectSummary,
@@ -74,6 +73,9 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DRIVE_FOLDER_ID = "1fybSLObkJjwR4znh53tHQDEGHO5025XI";
 const DRIVE_FOLDER_URL = `https://drive.google.com/drive/u/3/folders/${DRIVE_FOLDER_ID}`;
 const DRIVE_FOLDER_EMBED_URL = `https://drive.google.com/embeddedfolderview?id=${DRIVE_FOLDER_ID}#list`;
+const MEETING_RECORDS_FOLDER_ID = "1OkTZTlSUnCUes-Jf_0-RZvYIDqvBlG1I";
+const MEETING_RECORDS_FOLDER_URL = `https://drive.google.com/drive/u/3/folders/${MEETING_RECORDS_FOLDER_ID}`;
+const MEETING_RECORDS_FOLDER_EMBED_URL = `https://drive.google.com/embeddedfolderview?id=${MEETING_RECORDS_FOLDER_ID}#list`;
 const weekdayLabels = ["日", "一", "二", "三", "四", "五", "六"];
 const FORMATTED_MEETING_NOTES_PREFIX = "<!-- rotary-meeting-html-v1 -->";
 const rotaryMonthlyThemes: Record<number, { zh: string; en: string }> = {
@@ -184,25 +186,6 @@ function getFormattedMeetingHtml(notes: string | null) {
   return notes.slice(FORMATTED_MEETING_NOTES_PREFIX.length).trim();
 }
 
-function getMeetingPreview(notes: string | null) {
-  if (!notes) return "";
-  const formattedHtml = getFormattedMeetingHtml(notes);
-  if (!formattedHtml) return notes;
-
-  return formattedHtml
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, "\"")
-    .replace(/&#39;/g, "'")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
 function nullable(value: string | null | undefined) {
   return value?.trim() ? value : null;
 }
@@ -264,7 +247,6 @@ function App() {
     return new Date(today.getFullYear(), today.getMonth(), 1);
   });
   const [meetingDetail, setMeetingDetail] = useState<MeetingDetail | null>(null);
-  const [meetingDetailLoading, setMeetingDetailLoading] = useState(false);
   const [isAddingProject, setIsAddingProject] = useState(false);
   const [newProject, setNewProject] = useState<NewProjectState>(emptyNewProject);
   const [isAddingTask, setIsAddingTask] = useState(false);
@@ -272,8 +254,6 @@ function App() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
   const [kpiModal, setKpiModal] = useState<"total" | "due7" | "overdue" | "blocked" | null>(null);
-  const [isAddingMeeting, setIsAddingMeeting] = useState(false);
-  const [newMeeting, setNewMeeting] = useState({ title: "", meeting_date: "", notes: "", notes_doc_url: "" });
   const [isAddingAnnouncement, setIsAddingAnnouncement] = useState(false);
   const [newAnnouncement, setNewAnnouncement] = useState({ title: "", body: "" });
   const [isAddingCalendarEvent, setIsAddingCalendarEvent] = useState(false);
@@ -500,15 +480,6 @@ function App() {
           kind: "task" as const,
           projectId: task.project_id,
         })),
-      ...meetings.map((meeting) => ({
-        id: `meeting-${meeting.id}`,
-        date: meeting.meeting_date,
-        title: meeting.title,
-        label: "會議",
-        kind: "meeting" as const,
-        projectId: meeting.project_id ?? undefined,
-        meetingId: meeting.id,
-      })),
       ...calendarEvents.map((event) => ({
         id: `calendar-${event.id}`,
         date: event.event_date,
@@ -551,19 +522,13 @@ function App() {
       cells,
       monthEvents,
     };
-  }, [calendarEvents, calendarMonth, meetings, projects, tasks]);
+  }, [calendarEvents, calendarMonth, projects, tasks]);
 
   function shiftCalendarMonth(offset: number) {
     setCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1));
   }
 
   function openCalendarEvent(event: CalendarEvent) {
-    if (event.meetingId) {
-      const meeting = meetings.find((item) => item.id === event.meetingId);
-      if (meeting) void openMeetingDetail(meeting);
-      return;
-    }
-
     if (event.projectId) {
       setSelectedProjectId(event.projectId);
     }
@@ -588,53 +553,6 @@ function App() {
     setCalendarEvents([]);
     setSelectedProjectId(null);
     setSelectedMeetingId(null);
-  }
-
-  async function openMeetingDetail(meeting: MeetingSummary) {
-    if (!supabase) return;
-    setSelectedProjectId(null);
-    setSelectedMeetingId(meeting.id);
-    setMeetingDetailLoading(true);
-    const decisionsResult = await supabase
-      .from("meeting_decisions")
-      .select("id,meeting_id,decision,created_at")
-      .eq("meeting_id", meeting.id)
-      .order("created_at");
-    setMeetingDetailLoading(false);
-    setMeetingDetail({
-      meeting,
-      decisions: (decisionsResult.data ?? []) as MeetingDecision[],
-    });
-    if (meeting.notes_doc_url) {
-      void importMeetingDoc(meeting);
-    }
-  }
-
-  async function addMeeting() {
-    if (!supabase || !newMeeting.title || !newMeeting.meeting_date) return;
-    setSaveMessage("新增中...");
-    const { data, error } = await supabase
-      .from("meetings")
-      .insert({
-        title: newMeeting.title,
-        meeting_date: newMeeting.meeting_date,
-        summary: null,
-        notes: newMeeting.notes || null,
-        notes_doc_url: newMeeting.notes_doc_url || null,
-      })
-      .select("id,project_id,title,meeting_date,summary,notes,google_meet_url,notes_doc_url")
-      .single();
-    if (error) { setSaveMessage("新增失敗。"); return; }
-    const createdMeeting = data as MeetingSummary;
-    setMeetings((prev) => [createdMeeting, ...prev]);
-    setNewMeeting({ title: "", meeting_date: "", notes: "", notes_doc_url: "" });
-    setIsAddingMeeting(false);
-    if (createdMeeting.notes_doc_url) {
-      const importedMeeting = await importMeetingDoc(createdMeeting);
-      if (importedMeeting) setSaveMessage("已新增並從 Google Doc 匯入完整內容。");
-      return;
-    }
-    setSaveMessage("已新增會議記錄。");
   }
 
   async function deleteMeeting(id: string) {
@@ -1405,9 +1323,7 @@ function App() {
               <CalendarDays size={18} />
               <h2>完整原始資訊</h2>
             </div>
-            {meetingDetailLoading ? (
-              <p className="empty">載入中...</p>
-            ) : selectedMeeting.notes || selectedMeetingDecisions.length > 0 ? (
+            {selectedMeeting.notes || selectedMeetingDecisions.length > 0 ? (
               <div className="meeting-original-content">
                 {selectedMeetingNotesHtml ? (
                   <div
@@ -2082,86 +1998,17 @@ function App() {
           <div className="panel-heading">
             <CalendarDays size={18} />
             <h2>會議記錄</h2>
-            <button className="btn-add panel-action" type="button" onClick={() => setIsAddingMeeting((v) => !v)}>
-              <Plus size={14} /> 新增會議記錄
-            </button>
+            <a className="btn-add panel-action" href={MEETING_RECORDS_FOLDER_URL} target="_blank" rel="noreferrer">
+              <ExternalLink size={14} /> 開啟資料夾
+            </a>
           </div>
 
-          {isAddingMeeting ? (
-            <div className="add-meeting-form">
-              <div className="edit-grid">
-                <label>
-                  會議標題
-                  <input
-                    type="text"
-                    value={newMeeting.title}
-                    onChange={(e) => setNewMeeting((v) => ({ ...v, title: e.target.value }))}
-                    placeholder="例：AI委員會第三次技術會議"
-                  />
-                </label>
-                <label>
-                  會議日期
-                  <input
-                    type="date"
-                    value={newMeeting.meeting_date}
-                    onChange={(e) => setNewMeeting((v) => ({ ...v, meeting_date: e.target.value }))}
-                  />
-                </label>
-                <label style={{ gridColumn: "1 / -1" }}>
-                  完整會議內容（選填）
-                  <textarea
-                    value={newMeeting.notes}
-                    onChange={(e) => setNewMeeting((v) => ({ ...v, notes: e.target.value }))}
-                    placeholder="輸入完整會議記錄，或貼上 Google Doc 連結後匯入"
-                  />
-                </label>
-                <label style={{ gridColumn: "1 / -1" }}>
-                  Google Doc 連結（選填）
-                  <input
-                    type="url"
-                    value={newMeeting.notes_doc_url}
-                    onChange={(e) => setNewMeeting((v) => ({ ...v, notes_doc_url: e.target.value }))}
-                    placeholder="https://docs.google.com/document/..."
-                  />
-                </label>
-              </div>
-              <div className="form-actions">
-                <button type="button" onClick={addMeeting}>新增</button>
-                <button type="button" onClick={() => { setIsAddingMeeting(false); setNewMeeting({ title: "", meeting_date: "", notes: "", notes_doc_url: "" }); }}>取消</button>
-              </div>
-            </div>
-          ) : null}
-
-          <div className="list">
-            {meetings.map((meeting) => (
-              <article className="list-row--meeting" key={meeting.id}>
-                <button
-                  className="meeting-row-header"
-                  type="button"
-                  onClick={() => openMeetingDetail(meeting)}
-                >
-                  <div className="meeting-row-meta">
-                    <span className="meeting-title">{meeting.title}</span>
-                    <span className="meeting-date">{meeting.meeting_date}</span>
-                    {meeting.notes ? <pre className="meeting-notes meeting-notes--preview">{getMeetingPreview(meeting.notes)}</pre> : null}
-                  </div>
-                  <div className="row-actions">
-                    {meeting.google_meet_url ? (
-                      <a href={meeting.google_meet_url} target="_blank" rel="noreferrer" title="開啟 Google Meet" onClick={(e) => e.stopPropagation()}>
-                        <ExternalLink size={16} />
-                      </a>
-                    ) : null}
-                    {meeting.notes_doc_url ? (
-                      <a href={meeting.notes_doc_url} target="_blank" rel="noreferrer" title="開啟 Google Doc" onClick={(e) => e.stopPropagation()}>
-                        <ExternalLink size={16} />
-                      </a>
-                    ) : null}
-                    <ChevronDown size={16} style={{ color: "var(--text-muted)" }} />
-                  </div>
-                </button>
-              </article>
-            ))}
-            {meetings.length === 0 && loadState !== "loading" ? <p className="empty">目前沒有會議紀錄。</p> : null}
+          <div className="meeting-folder-panel">
+            <iframe
+              title="AI 委員會會議記錄 Google Drive 資料夾"
+              src={MEETING_RECORDS_FOLDER_EMBED_URL}
+              loading="lazy"
+            />
           </div>
         </div>
 

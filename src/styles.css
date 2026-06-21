@@ -1158,6 +1158,22 @@ h4 {
   overflow: hidden;
 }
 
+.meeting-folder-panel {
+  margin-top: 16px;
+  overflow: hidden;
+  border: 1px solid var(--gold-border);
+  border-radius: 8px;
+  background: var(--blue-card);
+}
+
+.meeting-folder-panel iframe {
+  display: block;
+  width: 100%;
+  min-height: 360px;
+  border: 0;
+  background: #ffffff;
+}
+
 .meeting-decisions {
   list-style: none;
   padding: 0;
