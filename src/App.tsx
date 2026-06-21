@@ -106,6 +106,7 @@ const MEETING_RECORDS_FOLDER_URL = `https://drive.google.com/drive/u/3/folders/$
 const MEETING_RECORDS_FOLDER_EMBED_URL = `https://drive.google.com/embeddedfolderview?id=${MEETING_RECORDS_FOLDER_ID}#list`;
 const weekdayLabels = ["日", "一", "二", "三", "四", "五", "六"];
 const FORMATTED_MEETING_NOTES_PREFIX = "<!-- rotary-meeting-html-v1 -->";
+const STRUCTURED_MEETING_RECORD_PREFIX = "<!-- rotary-structured-meeting-v1 -->";
 const rotaryMonthlyThemes: Record<number, { zh: string; en: string }> = {
   0: { zh: "職業服務月", en: "Vocational Service" },
   1: { zh: "和平建立與衝突預防月", en: "Peacebuilding and Conflict Prevention" },
@@ -748,7 +749,7 @@ function App() {
         title: newMeetingRecord.title.trim(),
         meeting_date: newMeetingRecord.meeting_date,
         summary: null,
-        notes: `${FORMATTED_MEETING_NOTES_PREFIX}\n${notesHtml}`,
+        notes: `${FORMATTED_MEETING_NOTES_PREFIX}\n${STRUCTURED_MEETING_RECORD_PREFIX}\n${notesHtml}`,
         google_meet_url: nullable(newMeetingRecord.google_meet_url),
         notes_doc_url: nullable(newMeetingRecord.notes_doc_url),
       })
@@ -1458,6 +1459,10 @@ function App() {
     : null;
   const selectedMeetingDecisions =
     selectedMeetingId && meetingDetail?.meeting.id === selectedMeetingId ? meetingDetail.decisions : [];
+  const platformMeetingRecords = meetings.filter((meeting) =>
+    meeting.notes?.includes(STRUCTURED_MEETING_RECORD_PREFIX)
+    || (meeting.notes?.startsWith(FORMATTED_MEETING_NOTES_PREFIX) && !meeting.notes_doc_url),
+  );
   const visibleSaveMessage =
     saveMessage && !saveMessage.startsWith("已") ? saveMessage : "";
 
@@ -2365,6 +2370,60 @@ function App() {
                   取消
                 </button>
               </div>
+            </div>
+          ) : null}
+
+          {platformMeetingRecords.length > 0 ? (
+            <div className="list meeting-record-list">
+              {platformMeetingRecords.map((meeting) => (
+                <article className="list-row--meeting" key={meeting.id}>
+                  <button
+                    className="meeting-row-header"
+                    type="button"
+                    onClick={() => {
+                      setSelectedMeetingId(meeting.id);
+                      setMeetingDetail({ meeting, decisions: [] });
+                    }}
+                  >
+                    <div className="meeting-row-meta">
+                      <span className="meeting-title">{meeting.title}</span>
+                      <span className="meeting-date">{meeting.meeting_date}</span>
+                    </div>
+                    <div className="row-actions">
+                      {meeting.notes_doc_url ? (
+                        <a href={meeting.notes_doc_url} target="_blank" rel="noreferrer" title="開啟 Google Doc" onClick={(event) => event.stopPropagation()}>
+                          <ExternalLink size={16} />
+                        </a>
+                      ) : null}
+                      <button
+                        className="icon-button"
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          startMeetingEdit(meeting);
+                        }}
+                        title="編輯"
+                        aria-label="編輯"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        className="icon-button icon-button--danger"
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void deleteMeeting(meeting.id);
+                        }}
+                        title="刪除此會議記錄"
+                        aria-label="刪除"
+                      >
+                        <X size={14} />
+                      </button>
+                      <ChevronDown size={16} style={{ color: "var(--text-muted)" }} />
+                    </div>
+                  </button>
+                </article>
+              ))}
             </div>
           ) : null}
 
