@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FolderKanban, HardDrive, LogOut, Megaphone, Pencil, Plus, RefreshCw, Save, Upload, X } from "lucide-react";
+import { ArrowLeft, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FolderKanban, HardDrive, LogOut, Megaphone, Pencil, Plus, RefreshCw, Save, X } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { StatCard } from "./components/StatCard";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
@@ -14,7 +14,7 @@ import type {
 import "./styles.css";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
-type EditKind = "project" | "task" | "meeting";
+type EditKind = "project" | "task" | "meeting" | "announcement";
 type GanttScale = "week" | "month";
 type CalendarEventKind = "project" | "task" | "meeting" | "custom";
 type CalendarEvent = {
@@ -78,6 +78,42 @@ type NewMeetingTodoRow = {
   owner: string;
   task: string;
   due: string;
+  status: "doing" | "done";
+};
+type ProjectDocumentFeature = {
+  no: string;
+  name: string;
+  description: string;
+  permission: string;
+  source: string;
+  phase: string;
+  status: "todo" | "doing" | "done";
+};
+type ProjectDocumentPermission = {
+  level: string;
+  role: string;
+  scope: string;
+  notes: string;
+};
+type ProjectDocumentPrivacy = {
+  topic: string;
+  description: string;
+  recommendation: string;
+};
+type ProjectDocumentSection = {
+  id: string;
+  title: string;
+  intro?: string;
+  bullets?: string[];
+  features?: ProjectDocumentFeature[];
+  permissions?: ProjectDocumentPermission[];
+  privacy?: ProjectDocumentPrivacy[];
+};
+type ProjectDocument = {
+  title: string;
+  subtitle: string;
+  source: string;
+  sections: ProjectDocumentSection[];
 };
 type NewMeetingRecordState = {
   title: string;
@@ -95,20 +131,27 @@ type NewMeetingRecordState = {
   next_meeting_topics: string;
   next_meeting_invitees: string;
 };
+type MeetingHtmlEditState = {
+  id: string;
+  title: string;
+  meeting_date: string;
+  html: string;
+  google_meet_url: string;
+  notes_doc_url: string;
+};
 
 const MEMBERS = ["Candice", "PT", "Vivian", "Kent", "Jake", "Eric", "CP AI", "Jim", "Wesley"];
 
 const APP_NAME = "3481 Rotary AI專案管理平台";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
-const DRIVE_FOLDER_ID = "1fybSLObkJjwR4znh53tHQDEGHO5025XI";
-const DRIVE_FOLDER_URL = `https://drive.google.com/drive/u/3/folders/${DRIVE_FOLDER_ID}`;
-const DRIVE_FOLDER_EMBED_URL = `https://drive.google.com/embeddedfolderview?id=${DRIVE_FOLDER_ID}#list`;
-const MEETING_RECORDS_FOLDER_ID = "1OkTZTlSUnCUes-Jf_0-RZvYIDqvBlG1I";
-const MEETING_RECORDS_FOLDER_URL = `https://drive.google.com/drive/u/3/folders/${MEETING_RECORDS_FOLDER_ID}`;
-const MEETING_RECORDS_FOLDER_EMBED_URL = `https://drive.google.com/embeddedfolderview?id=${MEETING_RECORDS_FOLDER_ID}#list`;
 const weekdayLabels = ["日", "一", "二", "三", "四", "五", "六"];
 const FORMATTED_MEETING_NOTES_PREFIX = "<!-- rotary-meeting-html-v1 -->";
 const STRUCTURED_MEETING_RECORD_PREFIX = "<!-- rotary-structured-meeting-v1 -->";
+const STRUCTURED_PROJECT_DOCUMENT_PREFIX = "<!-- rotary-project-document-v1 -->";
+const DRIVE_FOLDER_ID = "1fybSLObkJjwR4znh53tHQDEGHO5025XI";
+const DRIVE_FOLDER_URL = `https://drive.google.com/drive/u/3/folders/${DRIVE_FOLDER_ID}`;
+const DRIVE_FOLDER_EMBED_URL = `https://drive.google.com/embeddedfolderview?id=${DRIVE_FOLDER_ID}#list`;
+const CHATBOT_ARCHITECTURE_IMAGE = "/project-assets/chatbot-architecture.jpg";
 const rotaryMonthlyThemes: Record<number, { zh: string; en: string }> = {
   0: { zh: "職業服務月", en: "Vocational Service" },
   1: { zh: "和平建立與衝突預防月", en: "Peacebuilding and Conflict Prevention" },
@@ -143,6 +186,17 @@ const projectStatusLabels: Record<string, string> = {
 
 const projectStatusOptions = Object.entries(projectStatusLabels);
 const taskStatusOptions = Object.entries(taskStatusLabels);
+const meetingTodoStatusLabels: Record<NewMeetingTodoRow["status"], string> = {
+  doing: "進行中",
+  done: "已完成",
+};
+const meetingTodoStatusOptions = Object.entries(meetingTodoStatusLabels) as Array<[NewMeetingTodoRow["status"], string]>;
+const projectFeatureStatusLabels: Record<ProjectDocumentFeature["status"], string> = {
+  todo: "待確認",
+  doing: "規劃中",
+  done: "已完成",
+};
+const projectFeatureStatusOptions = Object.entries(projectFeatureStatusLabels) as Array<[ProjectDocumentFeature["status"], string]>;
 const priorityLabels: Record<TaskSummary["priority"], string> = {
   p0: "最高",
   p1: "高",
@@ -196,6 +250,7 @@ const emptyMeetingTodo: NewMeetingTodoRow = {
   owner: "",
   task: "",
   due: "",
+  status: "doing",
 };
 const emptyNewMeetingRecord: NewMeetingRecordState = {
   title: "",
@@ -243,14 +298,6 @@ function formatDateKey(date: Date) {
 function getFormattedMeetingHtml(notes: string | null) {
   if (!notes?.startsWith(FORMATTED_MEETING_NOTES_PREFIX)) return null;
   return notes.slice(FORMATTED_MEETING_NOTES_PREFIX.length).trim();
-}
-
-function getEditableMeetingNotes(notes: string | null) {
-  if (!notes) return "";
-  return notes
-    .replace(FORMATTED_MEETING_NOTES_PREFIX, "")
-    .replace(STRUCTURED_MEETING_RECORD_PREFIX, "")
-    .trim();
 }
 
 function parseMeetingRecordHtml(notes: string | null): NewMeetingRecordState {
@@ -333,10 +380,12 @@ function parseMeetingRecordHtml(notes: string | null): NewMeetingRecordState {
         for (const row of bodyRows) {
           const cells = row.querySelectorAll("td");
           if (cells.length >= 2) {
+            const rawStatus = cells[3]?.textContent?.trim() ?? "";
             todos.push({
               owner: cells[0]?.textContent?.trim() ?? "",
               task: cells[1]?.innerHTML.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim() ?? "",
               due: cells[2]?.textContent?.trim() ?? "",
+              status: rawStatus.includes("完成") ? "done" : "doing",
             });
           }
         }
@@ -383,6 +432,50 @@ function normalizeMeetingNotesForSave(value: string | null | undefined, original
   return `${FORMATTED_MEETING_NOTES_PREFIX}\n${structured ? `${STRUCTURED_MEETING_RECORD_PREFIX}\n` : ""}${body}`;
 }
 
+function parseProjectDocument(value: string | null | undefined): ProjectDocument | null {
+  if (!value?.startsWith(STRUCTURED_PROJECT_DOCUMENT_PREFIX)) return null;
+  const body = value.slice(STRUCTURED_PROJECT_DOCUMENT_PREFIX.length).trim();
+  if (!body) return null;
+  try {
+    const parsed = JSON.parse(body) as ProjectDocument;
+    if (!parsed || !Array.isArray(parsed.sections)) return null;
+    return parsed;
+  } catch (error) {
+    console.error("Invalid structured project document", error);
+    return null;
+  }
+}
+
+function stringifyProjectDocument(document: ProjectDocument) {
+  return `${STRUCTURED_PROJECT_DOCUMENT_PREFIX}\n${JSON.stringify(document, null, 2)}`;
+}
+
+function getProjectBackgroundText(value: string | null | undefined) {
+  const document = parseProjectDocument(value);
+  if (!document) return value ?? "";
+  const background = document.sections.find((section) => section.id === "background");
+  return [
+    background?.intro ?? "",
+    ...(background?.bullets ?? []),
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function normalizeProjectBackgroundForSave(value: string | null | undefined, originalValue: string | null | undefined) {
+  const document = parseProjectDocument(originalValue);
+  if (!document) return nullable(value);
+  const nextDocument: ProjectDocument = {
+    ...document,
+    sections: document.sections.map((section) =>
+      section.id === "background"
+        ? { ...section, intro: value?.trim() ?? "", bullets: [] }
+        : section,
+    ),
+  };
+  return stringifyProjectDocument(nextDocument);
+}
+
 function escapeHtml(value: string) {
   return value
     .replace(/&/g, "&amp;")
@@ -421,9 +514,9 @@ function buildMeetingRecordHtml(record: NewMeetingRecordState) {
     })
     .join("");
   const todoRows = record.todos
-    .filter((todo) => Object.values(todo).some((value) => value.trim()))
+    .filter((todo) => [todo.owner, todo.task, todo.due].some((value) => value.trim()))
     .map((todo) =>
-      `<tr><td>${escapeHtml(todo.owner)}</td><td>${escapeHtml(todo.task).replace(/\n/g, "<br>")}</td><td>${escapeHtml(todo.due)}</td></tr>`,
+      `<tr><td>${escapeHtml(todo.owner)}</td><td>${escapeHtml(todo.task).replace(/\n/g, "<br>")}</td><td>${escapeHtml(todo.due)}</td><td>${escapeHtml(meetingTodoStatusLabels[todo.status] ?? meetingTodoStatusLabels.doing)}</td></tr>`,
     )
     .join("");
   const nextMeetingRows = tableRows([
@@ -437,7 +530,7 @@ function buildMeetingRecordHtml(record: NewMeetingRecordState) {
     `<h1>${escapeHtml(title)}</h1>`,
     meetingInfoRows ? `<h2>一、會議資訊</h2><table><tbody>${meetingInfoRows}</tbody></table>` : "",
     decisionSections ? `<h2>二、會議決議</h2>${decisionSections}` : "",
-    todoRows ? `<h2>三、待辦事項 To Do</h2><table><thead><tr><th>負責人</th><th>待辦事項</th><th>期限</th></tr></thead><tbody>${todoRows}</tbody></table>` : "",
+    todoRows ? `<h2>三、待辦事項 To Do</h2><table><thead><tr><th>負責人</th><th>待辦事項</th><th>期限</th><th>狀態</th></tr></thead><tbody>${todoRows}</tbody></table>` : "",
     nextMeetingRows ? `<h2>四、下次會議</h2><table><tbody>${nextMeetingRows}</tbody></table>` : "",
   ]
     .filter(Boolean)
@@ -446,6 +539,18 @@ function buildMeetingRecordHtml(record: NewMeetingRecordState) {
 
 function nullable(value: string | null | undefined) {
   return value?.trim() ? value : null;
+}
+
+function uniqueAnnouncements(items: AnnouncementSummary[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const body = item.body?.replace(/\s+/g, " ").trim() ?? "";
+    const title = item.title.replace("⚠️", "").replace(/[\s—:：-]+/g, "").trim();
+    const key = body.length > 20 ? body : title;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function slugify(value: string) {
@@ -515,13 +620,13 @@ function App() {
   const [isAddingMeetingRecord, setIsAddingMeetingRecord] = useState(false);
   const [newMeetingRecord, setNewMeetingRecord] = useState<NewMeetingRecordState>(emptyNewMeetingRecord);
   const [editingMeetingRecord, setEditingMeetingRecord] = useState<(NewMeetingRecordState & { id: string; google_meet_url: string; notes_doc_url: string }) | null>(null);
+  const [editingMeetingHtml, setEditingMeetingHtml] = useState<MeetingHtmlEditState | null>(null);
+  const [editingProjectDocument, setEditingProjectDocument] = useState<(ProjectDocument & { projectId: string }) | null>(null);
   const [isAddingAnnouncement, setIsAddingAnnouncement] = useState(false);
   const [newAnnouncement, setNewAnnouncement] = useState({ title: "", body: "" });
   const [isAddingCalendarEvent, setIsAddingCalendarEvent] = useState(false);
   const [newCalendarEvent, setNewCalendarEvent] = useState<NewCalendarEventState>(emptyNewCalendarEvent);
-  const [importingMeetingId, setImportingMeetingId] = useState<string | null>(null);
   const [driveRefreshKey, setDriveRefreshKey] = useState(0);
-  const [driveSyncedAt, setDriveSyncedAt] = useState(() => new Date());
   const meetingFormRef = useRef<HTMLDivElement | null>(null);
 
   const loadDashboardData = useCallback(async (showLoading = true) => {
@@ -570,7 +675,7 @@ function App() {
       setProjects(projectResult.data ?? []);
       setTasks(taskResult.data ?? []);
       setMeetings(meetingResult.data ?? []);
-      setAnnouncements(announcementResult.error ? [] : announcementResult.data ?? []);
+      setAnnouncements(announcementResult.error ? [] : uniqueAnnouncements(announcementResult.data ?? []));
       setCalendarEvents(calendarEventResult.error ? [] : calendarEventResult.data ?? []);
       setLoadState("ready");
     } catch (error) {
@@ -844,41 +949,6 @@ function App() {
     setSaveMessage("已刪除。");
   }
 
-  async function importMeetingDoc(meeting: MeetingSummary) {
-    if (!supabase || !meeting.notes_doc_url) return null;
-
-    setImportingMeetingId(meeting.id);
-    setSaveMessage("正在匯入 Google Doc...");
-    const { data, error } = await supabase.functions.invoke("import-meeting-doc", {
-      body: {
-        meetingId: meeting.id,
-        url: meeting.notes_doc_url,
-      },
-    });
-    setImportingMeetingId(null);
-
-    if (error) {
-      console.error(error);
-      setSaveMessage("匯入失敗。請確認 Google Doc 已開放連結讀取，或已發布到網路。");
-      return null;
-    }
-
-    const updatedMeeting = (data as { meeting?: MeetingSummary }).meeting;
-    if (!updatedMeeting) {
-      setSaveMessage("匯入失敗，後端未回傳會議資料。");
-      return null;
-    }
-
-    setMeetings((current) => current.map((item) => (item.id === updatedMeeting.id ? updatedMeeting : item)));
-    setMeetingDetail((current) =>
-      current?.meeting.id === updatedMeeting.id
-        ? { ...current, meeting: updatedMeeting }
-        : current,
-    );
-    setSaveMessage("已從 Google Doc 匯入會議記錄。");
-    return updatedMeeting;
-  }
-
   async function addMeetingRecord() {
     if (!supabase) { setSaveMessage("Supabase 尚未連線。"); return; }
     if (!newMeetingRecord.title.trim()) { setSaveMessage("請填寫會議名稱。"); return; }
@@ -999,24 +1069,142 @@ function App() {
     setSaveMessage("已刪除行事曆內容。");
   }
 
-  function handleDriveUploadSelection(event: React.ChangeEvent<HTMLInputElement>) {
-    const fileName = event.target.files?.[0]?.name;
-    event.target.value = "";
-    window.open(DRIVE_FOLDER_URL, "_blank", "noopener,noreferrer");
-    setSaveMessage(fileName ? `請在 Google Drive 資料夾中完成上傳：${fileName}` : "請在 Google Drive 資料夾中完成上傳。");
-  }
-
-  function syncDriveFolder() {
-    setDriveRefreshKey((current) => current + 1);
-    setDriveSyncedAt(new Date());
-  }
-
   function startEdit(kind: EditKind, item: { id: string } & object) {
     const values = Object.fromEntries(
       Object.entries(item as Record<string, unknown>).map(([key, value]) => [key, value == null ? "" : String(value)]),
     );
+    if (kind === "project") {
+      values.project_background = getProjectBackgroundText(values.project_background);
+    }
     setSaveMessage("");
     setEditing({ kind, id: String(item.id), values });
+  }
+
+  function startProjectDocumentEdit(project: ProjectSummary, document: ProjectDocument) {
+    setEditingProjectDocument({
+      ...document,
+      projectId: project.id,
+      sections: document.sections.map((section) => ({
+        ...section,
+        bullets: [...(section.bullets ?? [])],
+        features: section.features?.map((feature) => ({ ...feature })),
+        permissions: section.permissions?.map((permission) => ({ ...permission })),
+        privacy: section.privacy?.map((item) => ({ ...item })),
+      })),
+    });
+    setSaveMessage("");
+  }
+
+  function setEditingProjectDocumentValue(field: "title" | "subtitle" | "source", value: string) {
+    setEditingProjectDocument((current) => current ? { ...current, [field]: value } : current);
+  }
+
+  function setEditingProjectSectionValue(sectionIndex: number, field: "title" | "intro", value: string) {
+    setEditingProjectDocument((current) => current ? {
+      ...current,
+      sections: current.sections.map((section, index) => index === sectionIndex ? { ...section, [field]: value } : section),
+    } : current);
+  }
+
+  function setEditingProjectBullet(sectionIndex: number, bulletIndex: number, value: string) {
+    setEditingProjectDocument((current) => current ? {
+      ...current,
+      sections: current.sections.map((section, index) => index === sectionIndex
+        ? { ...section, bullets: (section.bullets ?? []).map((bullet, i) => i === bulletIndex ? value : bullet) }
+        : section),
+    } : current);
+  }
+
+  function addEditingProjectBullet(sectionIndex: number) {
+    setEditingProjectDocument((current) => current ? {
+      ...current,
+      sections: current.sections.map((section, index) => index === sectionIndex
+        ? { ...section, bullets: [...(section.bullets ?? []), ""] }
+        : section),
+    } : current);
+  }
+
+  function removeEditingProjectBullet(sectionIndex: number, bulletIndex: number) {
+    setEditingProjectDocument((current) => current ? {
+      ...current,
+      sections: current.sections.map((section, index) => index === sectionIndex
+        ? { ...section, bullets: (section.bullets ?? []).filter((_, i) => i !== bulletIndex) }
+        : section),
+    } : current);
+  }
+
+  function setEditingProjectFeatureValue(
+    sectionIndex: number,
+    featureIndex: number,
+    field: keyof ProjectDocumentFeature,
+    value: string,
+  ) {
+    setEditingProjectDocument((current) => current ? {
+      ...current,
+      sections: current.sections.map((section, index) => index === sectionIndex
+        ? {
+            ...section,
+            features: (section.features ?? []).map((feature, i) =>
+              i === featureIndex ? { ...feature, [field]: value } : feature,
+            ),
+          }
+        : section),
+    } : current);
+  }
+
+  function setEditingProjectPermissionValue(
+    sectionIndex: number,
+    rowIndex: number,
+    field: keyof ProjectDocumentPermission,
+    value: string,
+  ) {
+    setEditingProjectDocument((current) => current ? {
+      ...current,
+      sections: current.sections.map((section, index) => index === sectionIndex
+        ? {
+            ...section,
+            permissions: (section.permissions ?? []).map((row, i) => i === rowIndex ? { ...row, [field]: value } : row),
+          }
+        : section),
+    } : current);
+  }
+
+  function setEditingProjectPrivacyValue(
+    sectionIndex: number,
+    rowIndex: number,
+    field: keyof ProjectDocumentPrivacy,
+    value: string,
+  ) {
+    setEditingProjectDocument((current) => current ? {
+      ...current,
+      sections: current.sections.map((section, index) => index === sectionIndex
+        ? {
+            ...section,
+            privacy: (section.privacy ?? []).map((row, i) => i === rowIndex ? { ...row, [field]: value } : row),
+          }
+        : section),
+    } : current);
+  }
+
+  async function saveProjectDocumentEdit() {
+    if (!supabase || !editingProjectDocument || !session?.access_token) return;
+    setSaveMessage("儲存專案分段資料...");
+    const { projectId, ...document } = editingProjectDocument;
+    try {
+      const updatedProject = await updateSupabaseRow<ProjectSummary>(
+        "projects",
+        projectId,
+        { project_background: stringifyProjectDocument(document) },
+        "id,name,slug,description,status,owner_names,project_purpose,project_background,participating_units,start_date,expected_end_date,budget_range,google_drive_folder_url,drive_folder_label,drive_folder_purpose,updated_at",
+      );
+      setProjects((items) => items.map((item) => (item.id === projectId ? updatedProject : item)));
+      setEditingProjectDocument(null);
+      await loadDashboardData(false);
+      setSaveMessage("已更新專案分段資料。");
+    } catch (error) {
+      console.error(error);
+      setSaveMessage(error instanceof Error ? `儲存失敗：${error.message}` : "儲存失敗，請確認你有專案編輯權限。");
+    }
   }
 
   function startMeetingEdit(meeting: MeetingSummary) {
@@ -1032,6 +1220,52 @@ function App() {
       notes_doc_url: meeting.notes_doc_url ?? "",
     });
     setSaveMessage("");
+  }
+
+  function startMeetingHtmlEdit(meeting: MeetingSummary) {
+    setSelectedMeetingId(meeting.id);
+    setMeetingDetail((current) =>
+      current?.meeting.id === meeting.id ? current : { meeting, decisions: [] },
+    );
+    setEditingMeetingRecord(null);
+    setEditingMeetingHtml({
+      id: meeting.id,
+      title: meeting.title,
+      meeting_date: meeting.meeting_date,
+      html: getFormattedMeetingHtml(meeting.notes) ?? meeting.notes ?? "",
+      google_meet_url: meeting.google_meet_url ?? "",
+      notes_doc_url: meeting.notes_doc_url ?? "",
+    });
+    setSaveMessage("");
+  }
+
+  async function saveMeetingHtmlEdit() {
+    if (!supabase || !editingMeetingHtml || !session?.access_token) return;
+    setSaveMessage("儲存中...");
+    try {
+      const html = editingMeetingHtml.html.trim();
+      const updatedMeeting = await updateSupabaseRow<MeetingSummary>(
+        "meetings",
+        editingMeetingHtml.id,
+        {
+          title: nullable(editingMeetingHtml.title),
+          meeting_date: nullable(editingMeetingHtml.meeting_date),
+          notes: html ? `${FORMATTED_MEETING_NOTES_PREFIX}\n${html}` : null,
+          google_meet_url: nullable(editingMeetingHtml.google_meet_url),
+          notes_doc_url: nullable(editingMeetingHtml.notes_doc_url),
+        },
+        "id,project_id,title,meeting_date,summary,notes,google_meet_url,notes_doc_url",
+      );
+      setMeetings((items) => items.map((item) => (item.id === editingMeetingHtml.id ? updatedMeeting : item)));
+      setMeetingDetail((current) =>
+        current?.meeting.id === editingMeetingHtml.id ? { ...current, meeting: updatedMeeting } : current,
+      );
+      setEditingMeetingHtml(null);
+      setSaveMessage("已儲存會議記錄。");
+    } catch (error) {
+      console.error(error);
+      setSaveMessage(error instanceof Error ? `儲存失敗：${error.message}` : "儲存失敗，請確認你有編輯權限。");
+    }
   }
 
   async function saveMeetingRecordEdit() {
@@ -1065,6 +1299,10 @@ function App() {
 
   function setEditingMeetingRecordValue(field: keyof Omit<NewMeetingRecordState, "decisions" | "todos">, value: string) {
     setEditingMeetingRecord((current) => current ? { ...current, [field]: value } : current);
+  }
+
+  function setEditingMeetingHtmlValue(field: keyof MeetingHtmlEditState, value: string) {
+    setEditingMeetingHtml((current) => current ? { ...current, [field]: value } : current);
   }
 
   function setEditingMeetingDecisionValue(index: number, field: keyof NewMeetingDecisionRow, value: string) {
@@ -1325,6 +1563,9 @@ function App() {
     const originalMeeting = kind === "meeting"
       ? meetings.find((meeting) => meeting.id === id) ?? meetingDetail?.meeting ?? null
       : null;
+    const originalProject = kind === "project"
+      ? projects.find((project) => project.id === id) ?? null
+      : null;
     const payloadByKind: Record<EditKind, Record<string, string | null>> = {
       project: {
         name: nullable(values.name),
@@ -1332,7 +1573,7 @@ function App() {
         status: values.status,
         owner_names: nullable(values.owner_names),
         project_purpose: nullable(values.project_purpose),
-        project_background: nullable(values.project_background),
+        project_background: normalizeProjectBackgroundForSave(values.project_background, originalProject?.project_background),
         participating_units: nullable(values.participating_units),
         start_date: nullable(values.start_date),
         expected_end_date: nullable(values.expected_end_date),
@@ -1360,6 +1601,10 @@ function App() {
         notes: normalizeMeetingNotesForSave(values.notes, originalMeeting?.notes),
         google_meet_url: nullable(values.google_meet_url),
         notes_doc_url: nullable(values.notes_doc_url),
+      },
+      announcement: {
+        title: nullable(values.title),
+        body: nullable(values.body),
       },
     };
 
@@ -1395,6 +1640,21 @@ function App() {
           current?.meeting.id === id ? { ...current, meeting: updatedMeeting } : current,
         );
         setEditing(null);
+        return;
+      }
+
+      if (kind === "announcement") {
+        setSaveMessage("送出公告更新...");
+        const updatedAnnouncement = await updateSupabaseRow<AnnouncementSummary>(
+          "announcements",
+          id,
+          payloadByKind.announcement,
+          "id,title,body,created_at",
+        );
+
+        setAnnouncements((items) => items.map((item) => (item.id === id ? updatedAnnouncement : item)));
+        setEditing(null);
+        setSaveMessage("已更新公告。");
         return;
       }
 
@@ -1630,6 +1890,175 @@ function App() {
     );
   }
 
+  function renderProjectDocument(document: ProjectDocument, project: ProjectSummary) {
+    return (
+      <section className="panel project-document">
+        <div className="panel-heading">
+          <FolderKanban size={18} />
+          <h2>{document.title || "專案分段資料"}</h2>
+          <button
+            className="icon-button panel-action"
+            type="button"
+            onClick={() => startProjectDocumentEdit(project, document)}
+            title="編輯專案分段資料"
+            aria-label="編輯專案分段資料"
+          >
+            <Pencil size={16} />
+          </button>
+        </div>
+        {document.subtitle ? <p className="project-document-subtitle">{document.subtitle}</p> : null}
+        <div className="project-document-sections">
+          {document.sections.map((section) => (
+            <article className="project-document-section" key={section.id}>
+              <h3>{section.title}</h3>
+              {section.intro ? <p>{section.intro}</p> : null}
+              {section.bullets?.length ? (
+                <ul>
+                  {section.bullets.map((bullet, index) => <li key={`${section.id}-bullet-${index}`}>{bullet}</li>)}
+                </ul>
+              ) : null}
+              {section.features?.length ? (
+                <div className="project-feature-table">
+                  <div className="project-feature-table__head">
+                    <span>#</span>
+                    <span>功能名稱</span>
+                    <span>功能說明</span>
+                    <span>權限</span>
+                    <span>來源 / 備註</span>
+                    <span>階段</span>
+                    <span>狀態</span>
+                  </div>
+                  {section.features.map((feature) => (
+                    <div className="project-feature-table__row" key={`${section.id}-${feature.no}-${feature.name}`}>
+                      <span>{feature.no}</span>
+                      <strong>{feature.name}</strong>
+                      <p>{feature.description}</p>
+                      <span>{feature.permission}</span>
+                      <span>{feature.source}</span>
+                      <span>{feature.phase}</span>
+                      <span>{projectFeatureStatusLabels[feature.status] ?? feature.status}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {section.permissions?.length ? (
+                <div className="project-permission-grid">
+                  {section.permissions.map((row) => (
+                    <div className="project-permission-card" key={row.level}>
+                      <strong>{row.level} {row.role}</strong>
+                      <p>{row.scope}</p>
+                      <span>{row.notes}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {section.privacy?.length ? (
+                <div className="project-privacy-list">
+                  {section.privacy.map((row) => (
+                    <div key={row.topic}>
+                      <strong>{row.topic}</strong>
+                      <p>{row.description}</p>
+                      <span>{row.recommendation}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </article>
+          ))}
+        </div>
+        {document.source ? <p className="project-document-source">來源：{document.source}</p> : null}
+      </section>
+    );
+  }
+
+  function renderProjectDocumentEditor() {
+    if (!editingProjectDocument) return null;
+    return (
+      <section className="panel project-document-editor">
+        <div className="panel-heading">
+          <FolderKanban size={18} />
+          <h2>編輯專案分段資料</h2>
+        </div>
+        <div className="edit-grid">
+          <label>文件標題<input value={editingProjectDocument.title} onChange={(e) => setEditingProjectDocumentValue("title", e.target.value)} /></label>
+          <label>副標題<input value={editingProjectDocument.subtitle} onChange={(e) => setEditingProjectDocumentValue("subtitle", e.target.value)} /></label>
+          <label style={{ gridColumn: "1 / -1" }}>來源<input value={editingProjectDocument.source} onChange={(e) => setEditingProjectDocumentValue("source", e.target.value)} /></label>
+        </div>
+        <div className="project-document-editor-sections">
+          {editingProjectDocument.sections.map((section, sectionIndex) => (
+            <article className="meeting-form-card" key={section.id}>
+              <div className="edit-grid">
+                <label>分段標題<input value={section.title} onChange={(e) => setEditingProjectSectionValue(sectionIndex, "title", e.target.value)} /></label>
+                <label style={{ gridColumn: "1 / -1" }}>分段說明<textarea value={section.intro ?? ""} onChange={(e) => setEditingProjectSectionValue(sectionIndex, "intro", e.target.value)} /></label>
+              </div>
+              {section.bullets ? (
+                <div className="project-document-editor-list">
+                  <div className="meeting-form-section__head">
+                    <h4>段落項目</h4>
+                    <button className="btn-add" type="button" onClick={() => addEditingProjectBullet(sectionIndex)}><Plus size={14} />新增項目</button>
+                  </div>
+                  {section.bullets.map((bullet, bulletIndex) => (
+                    <div className="project-document-editor-row" key={`${section.id}-edit-bullet-${bulletIndex}`}>
+                      <textarea value={bullet} onChange={(e) => setEditingProjectBullet(sectionIndex, bulletIndex, e.target.value)} />
+                      <button className="icon-button icon-button--danger" type="button" onClick={() => removeEditingProjectBullet(sectionIndex, bulletIndex)} title="移除此項目" aria-label="移除此項目"><X size={14} /></button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {section.features ? (
+                <div className="project-document-editor-list">
+                  <h4>功能項目</h4>
+                  {section.features.map((feature, featureIndex) => (
+                    <div className="edit-grid project-feature-edit-grid" key={`${section.id}-edit-feature-${feature.no}`}>
+                      <label>編號<input value={feature.no} onChange={(e) => setEditingProjectFeatureValue(sectionIndex, featureIndex, "no", e.target.value)} /></label>
+                      <label>功能名稱<input value={feature.name} onChange={(e) => setEditingProjectFeatureValue(sectionIndex, featureIndex, "name", e.target.value)} /></label>
+                      <label>適用權限<input value={feature.permission} onChange={(e) => setEditingProjectFeatureValue(sectionIndex, featureIndex, "permission", e.target.value)} /></label>
+                      <label>階段<input value={feature.phase} onChange={(e) => setEditingProjectFeatureValue(sectionIndex, featureIndex, "phase", e.target.value)} /></label>
+                      <label>狀態<select value={feature.status} onChange={(e) => setEditingProjectFeatureValue(sectionIndex, featureIndex, "status", e.target.value as ProjectDocumentFeature["status"])}>
+                        {projectFeatureStatusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                      </select></label>
+                      <label>來源 / 備註<input value={feature.source} onChange={(e) => setEditingProjectFeatureValue(sectionIndex, featureIndex, "source", e.target.value)} /></label>
+                      <label style={{ gridColumn: "1 / -1" }}>功能說明<textarea value={feature.description} onChange={(e) => setEditingProjectFeatureValue(sectionIndex, featureIndex, "description", e.target.value)} /></label>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {section.permissions ? (
+                <div className="project-document-editor-list">
+                  <h4>權限層級</h4>
+                  {section.permissions.map((row, rowIndex) => (
+                    <div className="edit-grid project-permission-edit-grid" key={`${section.id}-edit-permission-${row.level}`}>
+                      <label>層級<input value={row.level} onChange={(e) => setEditingProjectPermissionValue(sectionIndex, rowIndex, "level", e.target.value)} /></label>
+                      <label>角色<input value={row.role} onChange={(e) => setEditingProjectPermissionValue(sectionIndex, rowIndex, "role", e.target.value)} /></label>
+                      <label>備註<input value={row.notes} onChange={(e) => setEditingProjectPermissionValue(sectionIndex, rowIndex, "notes", e.target.value)} /></label>
+                      <label style={{ gridColumn: "1 / -1" }}>可操作範圍<textarea value={row.scope} onChange={(e) => setEditingProjectPermissionValue(sectionIndex, rowIndex, "scope", e.target.value)} /></label>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {section.privacy ? (
+                <div className="project-document-editor-list">
+                  <h4>隱私與授權</h4>
+                  {section.privacy.map((row, rowIndex) => (
+                    <div className="edit-grid project-privacy-edit-grid" key={`${section.id}-edit-privacy-${row.topic}`}>
+                      <label>注意事項<input value={row.topic} onChange={(e) => setEditingProjectPrivacyValue(sectionIndex, rowIndex, "topic", e.target.value)} /></label>
+                      <label>建議作法<textarea value={row.recommendation} onChange={(e) => setEditingProjectPrivacyValue(sectionIndex, rowIndex, "recommendation", e.target.value)} /></label>
+                      <label style={{ gridColumn: "1 / -1" }}>說明<textarea value={row.description} onChange={(e) => setEditingProjectPrivacyValue(sectionIndex, rowIndex, "description", e.target.value)} /></label>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </article>
+          ))}
+        </div>
+        <div className="form-actions">
+          <button type="button" onClick={saveProjectDocumentEdit}>儲存</button>
+          <button type="button" onClick={() => { setEditingProjectDocument(null); setSaveMessage(""); }}>取消</button>
+        </div>
+      </section>
+    );
+  }
+
   if (!isSupabaseConfigured || !supabase) {
     return (
       <main className="shell shell--center">
@@ -1738,11 +2167,16 @@ function App() {
   const selectedProjectTasks = selectedProject
     ? tasks.filter((task) => task.project_id === selectedProject.id)
     : [];
+  const selectedProjectDocument = selectedProject ? parseProjectDocument(selectedProject.project_background) : null;
+  const selectedProjectIsChatbot = selectedProject
+    ? /chatbot|chat bot|line bot|扶輪chatbot|扶輪 chat/i.test(`${selectedProject.slug} ${selectedProject.name}`)
+    : false;
   const selectedMeeting =
     selectedMeetingId && meetingDetail?.meeting.id === selectedMeetingId
       ? meetingDetail.meeting
       : meetings.find((meeting) => meeting.id === selectedMeetingId) ?? null;
   const selectedMeetingNotesHtml = selectedMeeting ? getFormattedMeetingHtml(selectedMeeting.notes) : null;
+  const selectedMeetingIsStructured = Boolean(selectedMeeting?.notes?.includes(STRUCTURED_MEETING_RECORD_PREFIX));
   const selectedMeetingProject = selectedMeeting?.project_id
     ? projects.find((project) => project.id === selectedMeeting.project_id) ?? null
     : null;
@@ -1791,24 +2225,17 @@ function App() {
                   <ExternalLink size={16} />
                 </a>
               ) : null}
-              {selectedMeeting.notes_doc_url ? (
-                <a href={selectedMeeting.notes_doc_url} target="_blank" rel="noreferrer" title="開啟 Google Doc">
-                  <ExternalLink size={16} />
-                </a>
-              ) : null}
-              {selectedMeeting.notes_doc_url ? (
+              {selectedMeetingNotesHtml && !selectedMeetingIsStructured ? (
                 <button
-                  className="btn-add"
+                  className="icon-button"
                   type="button"
-                  onClick={() => importMeetingDoc(selectedMeeting)}
-                  title="同步 Google Doc"
-                  aria-label="同步 Google Doc"
-                  disabled={importingMeetingId === selectedMeeting.id}
+                  onClick={() => startMeetingHtmlEdit(selectedMeeting)}
+                  title="編輯"
+                  aria-label="編輯"
                 >
-                  <FileDown size={14} /> 同步 Google Doc
+                  <Pencil size={16} />
                 </button>
-              ) : null}
-              {meetingEditActions(selectedMeeting)}
+              ) : meetingEditActions(selectedMeeting)}
               <button
                 className="icon-button icon-button--danger"
                 type="button"
@@ -1820,6 +2247,36 @@ function App() {
               </button>
             </div>
           </div>
+
+          {editingMeetingHtml?.id === selectedMeeting.id ? (
+            <div className="add-meeting-form">
+              <section className="meeting-form-section">
+                <h3>編輯完整會議記錄</h3>
+                <div className="edit-grid">
+                  <label>
+                    會議名稱
+                    <input value={editingMeetingHtml.title} onChange={(e) => setEditingMeetingHtmlValue("title", e.target.value)} />
+                  </label>
+                  <label>
+                    會議日期
+                    <input type="date" value={editingMeetingHtml.meeting_date} onChange={(e) => setEditingMeetingHtmlValue("meeting_date", e.target.value)} />
+                  </label>
+                  <label>
+                    Google Meet 連結
+                    <input type="url" value={editingMeetingHtml.google_meet_url} onChange={(e) => setEditingMeetingHtmlValue("google_meet_url", e.target.value)} />
+                  </label>
+                  <label className="meeting-html-editor">
+                    會議記錄 HTML
+                    <textarea value={editingMeetingHtml.html} onChange={(e) => setEditingMeetingHtmlValue("html", e.target.value)} />
+                  </label>
+                </div>
+              </section>
+              <div className="form-actions">
+                <button type="button" onClick={saveMeetingHtmlEdit}>儲存</button>
+                <button type="button" className="btn-cancel" onClick={() => { setEditingMeetingHtml(null); setSaveMessage(""); }}>取消</button>
+              </div>
+            </div>
+          ) : null}
 
           {editingMeetingRecord?.id === selectedMeeting.id ? (
             <div className="add-meeting-form">
@@ -1839,7 +2296,6 @@ function App() {
                     {memberChips(editingMeetingRecord.pending_attendees, (v) => setEditingMeetingRecordValue("pending_attendees", v))}
                   </div>
                   <label>Google Meet 連結<input type="url" value={editingMeetingRecord.google_meet_url} onChange={(e) => setEditingMeetingRecordValue("google_meet_url", e.target.value)} /></label>
-                  <label>Google Doc 連結<input type="url" value={editingMeetingRecord.notes_doc_url} onChange={(e) => setEditingMeetingRecordValue("notes_doc_url", e.target.value)} /></label>
                 </div>
               </section>
               <section className="meeting-form-section">
@@ -1856,8 +2312,14 @@ function App() {
                       </div>
                       <div className="edit-grid meeting-decision-grid">
                         <label>事項主題<input value={decision.topic} onChange={(e) => setEditingMeetingDecisionValue(index, "topic", e.target.value)} /></label>
-                        <label>指定負責人<input list="rotary-members" value={decision.owner} onChange={(e) => setEditingMeetingDecisionValue(index, "owner", e.target.value)} /></label>
-                        <label>合作對象<input list="rotary-members" value={decision.collaborators} onChange={(e) => setEditingMeetingDecisionValue(index, "collaborators", e.target.value)} /></label>
+                        <div className="meeting-textarea-group">
+                          <label>指定負責人<input list="rotary-members" value={decision.owner} onChange={(e) => setEditingMeetingDecisionValue(index, "owner", e.target.value)} /></label>
+                          {memberChips(decision.owner, (v) => setEditingMeetingDecisionValue(index, "owner", v))}
+                        </div>
+                        <div className="meeting-textarea-group">
+                          <label>合作對象<input list="rotary-members" value={decision.collaborators} onChange={(e) => setEditingMeetingDecisionValue(index, "collaborators", e.target.value)} /></label>
+                          {memberChips(decision.collaborators, (v) => setEditingMeetingDecisionValue(index, "collaborators", v))}
+                        </div>
                         <label>時間／進度<input value={decision.schedule} onChange={(e) => setEditingMeetingDecisionValue(index, "schedule", e.target.value)} /></label>
                         <label>內容備註<textarea value={decision.notes} onChange={(e) => setEditingMeetingDecisionValue(index, "notes", e.target.value)} /></label>
                       </div>
@@ -1878,9 +2340,18 @@ function App() {
                         <button className="icon-button" type="button" onClick={() => removeEditingMeetingTodoRow(index)} title="移除此待辦" aria-label="移除此待辦"><X size={14} /></button>
                       </div>
                       <div className="edit-grid meeting-todo-grid">
-                        <label>負責人<input list="rotary-members" value={todo.owner} onChange={(e) => setEditingMeetingTodoValue(index, "owner", e.target.value)} /></label>
+                        <div className="meeting-textarea-group">
+                          <label>負責人<input list="rotary-members" value={todo.owner} onChange={(e) => setEditingMeetingTodoValue(index, "owner", e.target.value)} /></label>
+                          {memberChips(todo.owner, (v) => setEditingMeetingTodoValue(index, "owner", v))}
+                        </div>
                         <label>待辦事項<textarea value={todo.task} onChange={(e) => setEditingMeetingTodoValue(index, "task", e.target.value)} /></label>
                         <label>期限<input value={todo.due} onChange={(e) => setEditingMeetingTodoValue(index, "due", e.target.value)} /></label>
+                        <label>
+                          進度
+                          <select value={todo.status} onChange={(e) => setEditingMeetingTodoValue(index, "status", e.target.value as NewMeetingTodoRow["status"])}>
+                            {meetingTodoStatusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                          </select>
+                        </label>
                       </div>
                     </article>
                   ))}
@@ -1913,10 +2384,6 @@ function App() {
             <article className="detail-card">
               <span>關聯專案</span>
               <strong>{selectedMeetingProject?.name ?? "未連結專案"}</strong>
-            </article>
-            <article className="detail-card">
-              <span>Google Doc</span>
-              <strong>{selectedMeeting.notes_doc_url ? "已連結" : "未連結"}</strong>
             </article>
             <article className="detail-card">
               <span>會議決議</span>
@@ -2047,7 +2514,7 @@ function App() {
               </div>
               <div>
                 <span>專案背景</span>
-                <p>{selectedProject.project_background ?? "未設定"}</p>
+                <p>{getProjectBackgroundText(selectedProject.project_background) || "未設定"}</p>
               </div>
               <div>
                 <span>參與單位</span>
@@ -2071,6 +2538,21 @@ function App() {
               </div>
             </div>
           </section>
+
+          {editingProjectDocument?.projectId === selectedProject.id ? renderProjectDocumentEditor() : null}
+          {selectedProjectDocument && editingProjectDocument?.projectId !== selectedProject.id ? renderProjectDocument(selectedProjectDocument, selectedProject) : null}
+
+          {selectedProjectIsChatbot ? (
+            <section className="panel">
+              <div className="panel-heading">
+                <FolderKanban size={18} />
+                <h2>Chatbot 架構圖</h2>
+              </div>
+              <figure className="project-asset-figure">
+                <img src={CHATBOT_ARCHITECTURE_IMAGE} alt="扶輪社 3481 地區 AI ChatBot LINE Bot MVP 架構圖" />
+              </figure>
+            </section>
+          ) : null}
 
           <section className="panel">
             <div className="panel-heading">
@@ -2282,19 +2764,31 @@ function App() {
             {announcements.map((announcement) => (
               <article className="list-row announcement-row" key={announcement.id}>
                 <div>
-                  <strong>{announcement.title}</strong>
-                  <span>{new Date(announcement.created_at).toLocaleDateString("zh-TW")}</span>
-                  {announcement.body ? <p>{announcement.body}</p> : null}
+                  {isEditing("announcement", announcement.id) ? (
+                    <div className="announcement-edit">
+                      {editInput("title", "公告標題")}
+                      {editTextarea("body", "公告內容")}
+                    </div>
+                  ) : (
+                    <>
+                      <strong>{announcement.title}</strong>
+                      <span>{new Date(announcement.created_at).toLocaleDateString("zh-TW")}</span>
+                      {announcement.body ? <p>{announcement.body}</p> : null}
+                    </>
+                  )}
                 </div>
-                <button
-                  className="icon-button icon-button--danger"
-                  type="button"
-                  onClick={() => deleteAnnouncement(announcement.id)}
-                  title="刪除公告"
-                  aria-label="刪除公告"
-                >
-                  <X size={14} />
-                </button>
+                <div className="row-actions">
+                  {editActions("announcement", announcement)}
+                  <button
+                    className="icon-button icon-button--danger"
+                    type="button"
+                    onClick={() => deleteAnnouncement(announcement.id)}
+                    title="刪除公告"
+                    aria-label="刪除公告"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               </article>
             ))}
             {announcements.length === 0 && loadState !== "loading" ? <p className="empty">目前沒有公告。</p> : null}
@@ -2607,14 +3101,11 @@ function App() {
           <div className="panel-heading">
             <CalendarDays size={18} />
             <h2>會議記錄</h2>
-            <div className="drive-actions">
+            <div className="panel-heading-actions">
               <button className="btn-add" type="button" onClick={() => setIsAddingMeetingRecord((current) => !current)}>
                 {isAddingMeetingRecord ? <X size={14} /> : <Plus size={14} />}
                 {isAddingMeetingRecord ? "收合表單" : "新增會議記錄"}
               </button>
-              <a className="btn-add" href={MEETING_RECORDS_FOLDER_URL} target="_blank" rel="noreferrer">
-                <ExternalLink size={14} /> 開啟資料夾
-              </a>
             </div>
           </div>
 
@@ -2630,7 +3121,6 @@ function App() {
                   {newMeetingTextarea("attendees", "與會人員", true)}
                   {newMeetingTextarea("pending_attendees", "待確認出席", true)}
                   {newMeetingInput("google_meet_url", "Google Meet 連結", "url")}
-                  {newMeetingInput("notes_doc_url", "Google Doc 連結", "url")}
                 </div>
               </section>
 
@@ -2655,14 +3145,20 @@ function App() {
                           決議主題
                           <input value={decision.topic} onChange={(event) => setMeetingDecisionValue(index, "topic", event.target.value)} />
                         </label>
-                        <label>
-                          指定負責人
-                          <input list="rotary-members" value={decision.owner} onChange={(event) => setMeetingDecisionValue(index, "owner", event.target.value)} />
-                        </label>
-                        <label>
-                          合作對象
-                          <input list="rotary-members" value={decision.collaborators} onChange={(event) => setMeetingDecisionValue(index, "collaborators", event.target.value)} />
-                        </label>
+                        <div className="meeting-textarea-group">
+                          <label>
+                            指定負責人
+                            <input list="rotary-members" value={decision.owner} onChange={(event) => setMeetingDecisionValue(index, "owner", event.target.value)} />
+                          </label>
+                          {memberChips(decision.owner, (v) => setMeetingDecisionValue(index, "owner", v))}
+                        </div>
+                        <div className="meeting-textarea-group">
+                          <label>
+                            合作對象
+                            <input list="rotary-members" value={decision.collaborators} onChange={(event) => setMeetingDecisionValue(index, "collaborators", event.target.value)} />
+                          </label>
+                          {memberChips(decision.collaborators, (v) => setMeetingDecisionValue(index, "collaborators", v))}
+                        </div>
                         <label>
                           時間／進度
                           <input value={decision.schedule} onChange={(event) => setMeetingDecisionValue(index, "schedule", event.target.value)} />
@@ -2694,10 +3190,13 @@ function App() {
                         </button>
                       </div>
                       <div className="edit-grid meeting-todo-grid">
-                        <label>
-                          負責人
-                          <input list="rotary-members" value={todo.owner} onChange={(event) => setMeetingTodoValue(index, "owner", event.target.value)} />
-                        </label>
+                        <div className="meeting-textarea-group">
+                          <label>
+                            負責人
+                            <input list="rotary-members" value={todo.owner} onChange={(event) => setMeetingTodoValue(index, "owner", event.target.value)} />
+                          </label>
+                          {memberChips(todo.owner, (v) => setMeetingTodoValue(index, "owner", v))}
+                        </div>
                         <label>
                           待辦事項
                           <textarea value={todo.task} onChange={(event) => setMeetingTodoValue(index, "task", event.target.value)} />
@@ -2705,6 +3204,12 @@ function App() {
                         <label>
                           期限
                           <input value={todo.due} onChange={(event) => setMeetingTodoValue(index, "due", event.target.value)} />
+                        </label>
+                        <label>
+                          進度
+                          <select value={todo.status} onChange={(event) => setMeetingTodoValue(index, "status", event.target.value as NewMeetingTodoRow["status"])}>
+                            {meetingTodoStatusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                          </select>
                         </label>
                       </div>
                     </article>
@@ -2757,86 +3262,35 @@ function App() {
                       }
                     }}
                   >
-                    <div className="meeting-row-meta">
-                      <span className="meeting-title">{meeting.title}</span>
-                      <span className="meeting-date">{meeting.meeting_date}</span>
-                    </div>
-                    <div className="row-actions">
-                      {meeting.notes_doc_url ? (
-                        <a href={meeting.notes_doc_url} target="_blank" rel="noreferrer" title="開啟 Google Doc" onClick={(event) => event.stopPropagation()}>
-                          <ExternalLink size={16} />
-                        </a>
-                      ) : null}
-                      <button
-                        className="icon-button"
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          startMeetingEdit(meeting);
-                        }}
-                        title="編輯"
-                        aria-label="編輯"
-                      >
-                        <Pencil size={14} />
-                      </button>
-                      <button
-                        className="icon-button icon-button--danger"
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void deleteMeeting(meeting.id);
-                        }}
-                        title="刪除此會議記錄"
-                        aria-label="刪除"
-                      >
-                        <X size={14} />
-                      </button>
-                      <ChevronDown size={16} style={{ color: "var(--text-muted)" }} />
-                    </div>
+                    <span className="meeting-date meeting-date--only">{meeting.meeting_date}</span>
+                    <ChevronDown size={16} style={{ color: "var(--text-muted)" }} />
                   </div>
                 </article>
               ))}
             </div>
           ) : null}
-
-          <div className="meeting-folder-panel">
-            <iframe
-              title="AI 委員會會議記錄 Google Drive 資料夾"
-              src={MEETING_RECORDS_FOLDER_EMBED_URL}
-              loading="lazy"
-            />
-          </div>
         </div>
 
-        <div className="panel panel--wide">
+        <div className="panel panel--wide drive-panel">
           <div className="panel-heading">
             <HardDrive size={18} />
-            <h2>Google Drive 檔案</h2>
-            <div className="drive-actions">
-              <a className="btn-add" href={DRIVE_FOLDER_URL} target="_blank" rel="noreferrer">
-                <ExternalLink size={14} /> 開啟資料夾
-              </a>
-              <button className="btn-add" type="button" onClick={syncDriveFolder}>
-                <RefreshCw size={14} /> 同步
+            <h2>Google Drive 資料夾</h2>
+            <div className="panel-heading-actions">
+              <button className="icon-button" type="button" onClick={() => setDriveRefreshKey((current) => current + 1)} title="重新整理資料夾" aria-label="重新整理資料夾">
+                <RefreshCw size={16} />
               </button>
-              <label className="btn-add drive-upload-button">
-                <Upload size={14} /> 新增上傳檔案
-                <input type="file" onChange={handleDriveUploadSelection} />
-              </label>
+              <a className="btn-add" href={DRIVE_FOLDER_URL} target="_blank" rel="noreferrer">
+                <ExternalLink size={14} />
+                開啟資料夾
+              </a>
             </div>
           </div>
-          <div className="drive-panel">
-            <div className="drive-sync-status">
-              <span>最後同步</span>
-              <strong>{driveSyncedAt.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })}</strong>
-            </div>
-            <iframe
-              key={driveRefreshKey}
-              title="3481 AI 委員會 Google Drive 資料夾"
-              src={DRIVE_FOLDER_EMBED_URL}
-              loading="lazy"
-            />
-          </div>
+          <iframe
+            key={driveRefreshKey}
+            title="AI 委員會 Google Drive 資料夾"
+            src={DRIVE_FOLDER_EMBED_URL}
+            loading="lazy"
+          />
         </div>
 
       </section>
