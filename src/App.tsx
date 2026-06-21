@@ -1653,6 +1653,15 @@ function App() {
     }
   }
 
+  function downloadBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+
   function startRecording() {
     navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
       audioChunksRef.current = [];
@@ -1662,6 +1671,9 @@ function App() {
       mr.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
         const blob = new Blob(audioChunksRef.current, { type: mimeType });
+        const ext = mimeType.includes("webm") ? "webm" : "mp4";
+        const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+        downloadBlob(blob, `meeting-recording-${ts}.${ext}`);
         void handleAudioImport(blob, mimeType);
       };
       mr.start();
