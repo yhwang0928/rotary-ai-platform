@@ -1234,10 +1234,51 @@ h4 {
   margin-top: 12px;
   padding-top: 16px;
   display: grid;
-  gap: 12px;
+  gap: 16px;
 }
 
 .add-meeting-form .form-actions { margin-top: 4px; }
+
+.meeting-form-section {
+  display: grid;
+  gap: 10px;
+}
+
+.meeting-form-section__head,
+.meeting-form-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.meeting-form-section__head h4,
+.meeting-form-card__head strong {
+  margin: 0;
+}
+
+.meeting-form-list {
+  display: grid;
+  gap: 10px;
+}
+
+.meeting-form-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--gold-border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--white-06);
+}
+
+.meeting-form-card__head strong {
+  color: var(--gold-light);
+  font-size: 0.86rem;
+}
+
+.meeting-todo-grid {
+  grid-template-columns: minmax(130px, 0.8fr) minmax(240px, 2fr) minmax(120px, 0.8fr);
+}
 
 /* ── Task Table ── */
 .task-table { display: grid; gap: 6px; }
