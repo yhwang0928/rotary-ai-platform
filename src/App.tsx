@@ -1552,6 +1552,12 @@ function App() {
       const next = idx >= 0 ? parts.filter((_, i) => i !== idx) : [...parts, name];
       onChange(next.join("、"));
     }
+    function addCustom(input: HTMLInputElement) {
+      const name = input.value.trim();
+      if (!name) return;
+      toggle(name);
+      input.value = "";
+    }
     const active = new Set(value.split(/[、,，\s]+/).map((s) => s.trim()).filter(Boolean));
     return (
       <div className="member-chips">
@@ -1565,6 +1571,23 @@ function App() {
             {name}
           </button>
         ))}
+        <span className="member-chip-custom">
+          <input
+            className="member-chip-input"
+            placeholder="其他人員"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); addCustom(e.currentTarget); }
+            }}
+          />
+          <button
+            type="button"
+            className="member-chip-add"
+            onClick={(e) => {
+              const input = (e.currentTarget.previousElementSibling as HTMLInputElement);
+              addCustom(input);
+            }}
+          >+</button>
+        </span>
       </div>
     );
   }

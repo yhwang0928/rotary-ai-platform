@@ -1331,6 +1331,45 @@ h4 {
   font-weight: 600;
 }
 
+.member-chip-custom {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.member-chip-input {
+  width: 90px;
+  padding: 3px 8px;
+  border-radius: 99px 0 0 99px;
+  border: 1px solid var(--gold-border);
+  border-right: none;
+  background: var(--blue-card);
+  color: var(--text-main);
+  font-size: 0.8rem;
+  outline: none;
+}
+
+.member-chip-input:focus {
+  border-color: var(--gold);
+}
+
+.member-chip-add {
+  padding: 3px 8px;
+  border-radius: 0 99px 99px 0;
+  border: 1px solid var(--gold-border);
+  background: var(--blue-card);
+  color: var(--gold);
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.member-chip-add:hover {
+  background: var(--gold-dim);
+  border-color: var(--gold);
+}
+
 /* ── Task Table ── */
 .task-table { display: grid; gap: 6px; }
 
