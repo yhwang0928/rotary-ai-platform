@@ -117,6 +117,7 @@ type ProjectDocument = {
 };
 type NewMeetingRecordState = {
   title: string;
+  project_id: string;
   meeting_date: string;
   meeting_method: string;
   host: string;
@@ -148,6 +149,7 @@ const weekdayLabels = ["日", "一", "二", "三", "四", "五", "六"];
 const FORMATTED_MEETING_NOTES_PREFIX = "<!-- rotary-meeting-html-v1 -->";
 const STRUCTURED_MEETING_RECORD_PREFIX = "<!-- rotary-structured-meeting-v1 -->";
 const STRUCTURED_PROJECT_DOCUMENT_PREFIX = "<!-- rotary-project-document-v1 -->";
+const MEETING_TODO_SYNC_PREFIX = "meeting-todo";
 const DRIVE_FOLDER_ID = "1fybSLObkJjwR4znh53tHQDEGHO5025XI";
 const DRIVE_FOLDER_URL = `https://drive.google.com/drive/u/3/folders/${DRIVE_FOLDER_ID}`;
 const DRIVE_FOLDER_EMBED_URL = `https://drive.google.com/embeddedfolderview?id=${DRIVE_FOLDER_ID}#list`;
@@ -254,6 +256,7 @@ const emptyMeetingTodo: NewMeetingTodoRow = {
 };
 const emptyNewMeetingRecord: NewMeetingRecordState = {
   title: "",
+  project_id: "",
   meeting_date: "",
   meeting_method: "線上會議",
   host: "",
@@ -398,7 +401,7 @@ function parseMeetingRecordHtml(notes: string | null): NewMeetingRecordState {
             todos.push({
               owner: cells[0]?.textContent?.trim() ?? "",
               task: cells[1]?.innerHTML.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim() ?? "",
-              due: cells[2]?.textContent?.trim() ?? "",
+              due: normalizeMeetingTodoDueDate(cells[2]?.textContent?.trim() ?? "", meeting_date) ?? "",
               status: rawStatus.includes("完成") ? "done" : "doing",
             });
           }
@@ -416,6 +419,7 @@ function parseMeetingRecordHtml(notes: string | null): NewMeetingRecordState {
 
   return {
     title,
+    project_id: "",
     meeting_date,
     meeting_method,
     host,
@@ -551,6 +555,23 @@ function buildMeetingRecordHtml(record: NewMeetingRecordState) {
     .join("\n");
 }
 
+function normalizeMeetingTodoDueDate(value: string, meetingDate: string) {
+  const raw = value.trim();
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const year = toLocalDate(meetingDate)?.getFullYear() ?? new Date().getFullYear();
+  const match = raw.match(/(?:(\d{4})[/-])?(\d{1,2})(?:[/-]|月)(\d{1,2})(?:日)?/);
+  if (!match) return null;
+
+  const parsedYear = Number(match[1] ?? year);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(parsedYear, month - 1, day);
+  if (date.getFullYear() !== parsedYear || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+  return formatDateKey(date);
+}
+
 function nullable(value: string | null | undefined) {
   return value?.trim() ? value : null;
 }
@@ -632,6 +653,11 @@ function App() {
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
   const [kpiModal, setKpiModal] = useState<"total" | "due7" | "overdue" | "blocked" | null>(null);
   const [isAddingMeetingRecord, setIsAddingMeetingRecord] = useState(false);
+  const [importMode, setImportMode] = useState<"idle" | "file" | "audio" | "recording">("idle");
+  const [importStatus, setImportStatus] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const [newMeetingRecord, setNewMeetingRecord] = useState<NewMeetingRecordState>(emptyNewMeetingRecord);
   const [editingMeetingRecord, setEditingMeetingRecord] = useState<(NewMeetingRecordState & { id: string; google_meet_url: string; notes_doc_url: string }) | null>(null);
   const [editingMeetingHtml, setEditingMeetingHtml] = useState<MeetingHtmlEditState | null>(null);
@@ -936,6 +962,93 @@ function App() {
     }
   }
 
+  async function syncMeetingTodosToTasksAndCalendar(meeting: MeetingSummary, record: NewMeetingRecordState) {
+    if (!supabase) throw new Error("Supabase 尚未連線。");
+
+    const syncKey = `${MEETING_TODO_SYNC_PREFIX}:${meeting.id}`;
+    const todos = record.todos
+      .map((todo, index) => ({
+        ...todo,
+        index,
+        task: todo.task.trim(),
+        owner: todo.owner.trim(),
+        dueDate: normalizeMeetingTodoDueDate(todo.due, record.meeting_date || meeting.meeting_date),
+      }))
+      .filter((todo) => todo.task);
+
+    const { error: taskDeleteError } = await supabase
+      .from("tasks")
+      .delete()
+      .eq("source_sheet", syncKey);
+    if (taskDeleteError) throw taskDeleteError;
+
+    const { error: calendarDeleteError } = await supabase
+      .from("calendar_events")
+      .delete()
+      .like("description", `[${syncKey}]%`);
+    if (calendarDeleteError) throw calendarDeleteError;
+
+    if (!record.project_id || todos.length === 0) {
+      return { taskCount: 0, calendarCount: 0 };
+    }
+
+    const taskRows = todos.map((todo) => ({
+      project_id: record.project_id,
+      title: todo.task,
+      status: todo.status === "done" ? "done" : "doing",
+      priority: "p2",
+      start_date: record.meeting_date || meeting.meeting_date,
+      due_date: todo.dueDate,
+      completed_date: todo.status === "done" ? todo.dueDate ?? record.meeting_date ?? meeting.meeting_date : null,
+      owner_names: nullable(todo.owner),
+      collaborator_names: null,
+      output_title: null,
+      blocker_reason: null,
+      source_sheet: syncKey,
+      source_row: todo.index + 1,
+    }));
+
+    const { data: insertedTasks, error: taskInsertError } = await supabase
+      .from("tasks")
+      .insert(taskRows)
+      .select("id,project_id,title,status,priority,start_date,due_date,completed_date,blocker_reason,owner_names,collaborator_names,output_title");
+    if (taskInsertError) throw taskInsertError;
+
+    const calendarRows = todos
+      .filter((todo) => todo.dueDate)
+      .map((todo) => ({
+        project_id: record.project_id,
+        title: `待辦：${todo.task}`,
+        event_date: todo.dueDate as string,
+        location: null,
+        url: null,
+        description: `[${syncKey}]\n來源會議：${meeting.title}\n負責人：${todo.owner || "未指定"}\n狀態：${meetingTodoStatusLabels[todo.status]}`,
+      }));
+
+    let insertedCalendarEvents: CalendarEventSummary[] = [];
+    if (calendarRows.length > 0) {
+      const { data, error: calendarInsertError } = await supabase
+        .from("calendar_events")
+        .insert(calendarRows)
+        .select("id,project_id,title,event_date,description,location,url,created_at");
+      if (calendarInsertError) throw calendarInsertError;
+      insertedCalendarEvents = (data ?? []) as CalendarEventSummary[];
+    }
+
+    setTasks((current) => [
+      ...current.filter((task) => !insertedTasks?.some((inserted) => inserted.id === task.id)),
+      ...((insertedTasks ?? []) as TaskSummary[]),
+    ]);
+    setCalendarEvents((current) =>
+      [
+        ...current.filter((event) => !insertedCalendarEvents.some((inserted) => inserted.id === event.id)),
+        ...insertedCalendarEvents,
+      ].sort((a, b) => a.event_date.localeCompare(b.event_date)),
+    );
+
+    return { taskCount: insertedTasks?.length ?? 0, calendarCount: insertedCalendarEvents.length };
+  }
+
   async function signIn(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!supabase) return;
@@ -981,6 +1094,10 @@ function App() {
     if (!supabase) { setSaveMessage("Supabase 尚未連線。"); return; }
     if (!newMeetingRecord.title.trim()) { setSaveMessage("請填寫會議名稱。"); return; }
     if (!newMeetingRecord.meeting_date) { setSaveMessage("請填寫會議日期。"); return; }
+    if (newMeetingRecord.todos.some((todo) => todo.task.trim()) && !newMeetingRecord.project_id) {
+      setSaveMessage("有待辦事項時，請先選擇所屬專案，才能同步到任務與行事曆。");
+      return;
+    }
 
     setSaveMessage("新增會議記錄中...");
     const notesHtml = buildMeetingRecordHtml(newMeetingRecord);
@@ -988,6 +1105,7 @@ function App() {
       .from("meetings")
       .insert({
         title: newMeetingRecord.title.trim(),
+        project_id: nullable(newMeetingRecord.project_id),
         meeting_date: newMeetingRecord.meeting_date,
         summary: null,
         notes: `${FORMATTED_MEETING_NOTES_PREFIX}\n${STRUCTURED_MEETING_RECORD_PREFIX}\n${notesHtml}`,
@@ -1008,10 +1126,19 @@ function App() {
       return;
     }
 
-    setMeetings((current) => [data as MeetingSummary, ...current]);
+    const meeting = data as MeetingSummary;
+    setMeetings((current) => [meeting, ...current]);
+    try {
+      const syncResult = await syncMeetingTodosToTasksAndCalendar(meeting, newMeetingRecord);
+      await loadDashboardData(false);
+      setSaveMessage(`已新增會議記錄，並同步 ${syncResult.taskCount} 筆待辦、${syncResult.calendarCount} 筆行事曆。`);
+    } catch (syncError) {
+      console.error(syncError);
+      await loadDashboardData(false);
+      setSaveMessage(syncError instanceof Error ? `已新增會議記錄，但同步待辦失敗：${syncError.message}` : "已新增會議記錄，但同步待辦失敗。");
+    }
     setNewMeetingRecord(emptyNewMeetingRecord);
     setIsAddingMeetingRecord(false);
-    setSaveMessage("已新增會議記錄。");
   }
 
   async function addAnnouncement() {
@@ -1244,6 +1371,9 @@ function App() {
     setEditingMeetingRecord({
       ...parsed,
       id: meeting.id,
+      project_id: meeting.project_id ?? "",
+      title: meeting.title,
+      meeting_date: meeting.meeting_date,
       google_meet_url: meeting.google_meet_url ?? "",
       notes_doc_url: meeting.notes_doc_url ?? "",
     });
@@ -1298,6 +1428,10 @@ function App() {
 
   async function saveMeetingRecordEdit() {
     if (!supabase || !editingMeetingRecord || !session?.access_token) return;
+    if (editingMeetingRecord.todos.some((todo) => todo.task.trim()) && !editingMeetingRecord.project_id) {
+      setSaveMessage("有待辦事項時，請先選擇所屬專案，才能同步到任務與行事曆。");
+      return;
+    }
     setSaveMessage("儲存中...");
     const notesHtml = buildMeetingRecordHtml(editingMeetingRecord);
     try {
@@ -1306,6 +1440,7 @@ function App() {
         editingMeetingRecord.id,
         {
           title: nullable(editingMeetingRecord.title),
+          project_id: nullable(editingMeetingRecord.project_id),
           meeting_date: nullable(editingMeetingRecord.meeting_date),
           notes: `${FORMATTED_MEETING_NOTES_PREFIX}\n${STRUCTURED_MEETING_RECORD_PREFIX}\n${notesHtml}`,
           google_meet_url: nullable(editingMeetingRecord.google_meet_url),
@@ -1317,8 +1452,10 @@ function App() {
       setMeetingDetail((current) =>
         current?.meeting.id === editingMeetingRecord.id ? { ...current, meeting: updatedMeeting } : current,
       );
+      const syncResult = await syncMeetingTodosToTasksAndCalendar(updatedMeeting, editingMeetingRecord);
+      await loadDashboardData(false);
       setEditingMeetingRecord(null);
-      setSaveMessage("已儲存會議記錄。");
+      setSaveMessage(`已儲存會議記錄，並同步 ${syncResult.taskCount} 筆待辦、${syncResult.calendarCount} 筆行事曆。`);
     } catch (error) {
       console.error(error);
       setSaveMessage(error instanceof Error ? `儲存失敗：${error.message}` : "儲存失敗，請確認你有編輯權限。");
@@ -1450,6 +1587,95 @@ function App() {
         ? current.todos.filter((_todo, todoIndex) => todoIndex !== index)
         : [{ ...emptyMeetingTodo }],
     }));
+  }
+
+
+  async function applyImportedRecord(record: Partial<NewMeetingRecordState>) {
+    setNewMeetingRecord((current) => ({
+      ...current,
+      ...record,
+      decisions: record.decisions && record.decisions.length > 0 ? record.decisions : current.decisions,
+      todos: record.todos && record.todos.length > 0 ? record.todos : current.todos,
+    }));
+    setImportMode("idle");
+    setImportStatus("匯入完成，請確認並補充欄位後儲存。");
+  }
+
+  async function callParseApi(text: string) {
+    setImportStatus("AI 整理中\u2026");
+    const res = await fetch("/api/parse-meeting", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json() as { record?: Partial<NewMeetingRecordState>; error?: string };
+    if (data.error) throw new Error(data.error);
+    if (!data.record) throw new Error("AI 未回傳資料");
+    return data.record;
+  }
+
+  async function handleFileImport(file: File) {
+    setImportStatus("讀取檔案中\u2026");
+    try {
+      let text = "";
+      if (file.name.toLowerCase().endsWith(".docx")) {
+        const mammoth = await import("https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js" as string) as unknown as { extractRawText: (o: { arrayBuffer: ArrayBuffer }) => Promise<{ value: string }> };
+        const buf = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer: buf });
+        text = result.value;
+      } else {
+        text = await file.text();
+      }
+      const record = await callParseApi(text);
+      await applyImportedRecord(record);
+    } catch (err) {
+      setImportStatus(`匯入失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  async function handleAudioImport(blob: Blob, mimeType?: string) {
+    setImportStatus("語音上傳中\u2026");
+    try {
+      const formData = new FormData();
+      formData.append("audio", blob, `recording.${mimeType?.includes("webm") ? "webm" : "mp3"}`);
+      const res = await fetch("/api/transcribe", { method: "POST", body: formData });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json() as { text?: string; error?: string };
+      if (data.error) throw new Error(data.error);
+      const text = data.text ?? "";
+      if (!text.trim()) throw new Error("語音辨識結果為空");
+      setImportStatus(`語音辨識完成，共 ${text.length} 字。AI 整理中\u2026`);
+      const record = await callParseApi(text);
+      await applyImportedRecord(record);
+    } catch (err) {
+      setImportStatus(`匯入失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  function startRecording() {
+    navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+      audioChunksRef.current = [];
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
+      const mr = new MediaRecorder(stream, { mimeType });
+      mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      mr.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(audioChunksRef.current, { type: mimeType });
+        void handleAudioImport(blob, mimeType);
+      };
+      mr.start();
+      mediaRecorderRef.current = mr;
+      setIsRecording(true);
+      setImportStatus("錄音中\u2026 點擊「停止錄音」完成");
+    }).catch(() => setImportStatus("無法存取麥克風，請確認瀏覽器權限。"));
+  }
+
+  function stopRecording() {
+    mediaRecorderRef.current?.stop();
+    mediaRecorderRef.current = null;
+    setIsRecording(false);
+    setImportStatus("處理錄音中\u2026");
   }
 
   function startAddProject() {
@@ -2310,6 +2536,15 @@ function App() {
                 <h3>會議基本資訊</h3>
                 <div className="edit-grid">
                   <label>會議名稱<input value={editingMeetingRecord.title} onChange={(e) => setEditingMeetingRecordValue("title", e.target.value)} /></label>
+                  <label>
+                    所屬專案
+                    <select value={editingMeetingRecord.project_id} onChange={(e) => setEditingMeetingRecordValue("project_id", e.target.value)}>
+                      <option value="">未連結專案</option>
+                      {projects.map((project) => (
+                        <option key={project.id} value={project.id}>{project.name}</option>
+                      ))}
+                    </select>
+                  </label>
                   <label>會議日期<input type="date" value={editingMeetingRecord.meeting_date} onChange={(e) => setEditingMeetingRecordValue("meeting_date", e.target.value)} /></label>
                   <label>會議方式<input value={editingMeetingRecord.meeting_method} onChange={(e) => setEditingMeetingRecordValue("meeting_method", e.target.value)} /></label>
                   <label>主持人<input list="rotary-members" value={editingMeetingRecord.host} onChange={(e) => setEditingMeetingRecordValue("host", e.target.value)} /></label>
@@ -2371,7 +2606,7 @@ function App() {
                           {memberChips(todo.owner, (v) => setEditingMeetingTodoValue(index, "owner", v))}
                         </div>
                         <label>待辦事項<textarea value={todo.task} onChange={(e) => setEditingMeetingTodoValue(index, "task", e.target.value)} /></label>
-                        <label>期限<input value={todo.due} onChange={(e) => setEditingMeetingTodoValue(index, "due", e.target.value)} /></label>
+                        <label>期限<input type="date" value={todo.due} onChange={(e) => setEditingMeetingTodoValue(index, "due", e.target.value)} /></label>
                         <label>
                           進度
                           <select value={todo.status} onChange={(e) => setEditingMeetingTodoValue(index, "status", e.target.value as NewMeetingTodoRow["status"])}>
@@ -3145,10 +3380,94 @@ function App() {
 
           {isAddingMeetingRecord ? (
             <div className="add-meeting-form" ref={meetingFormRef}>
+              <div className="import-toolbar">
+                <span className="import-toolbar__label">匯入來源</span>
+                <button
+                  type="button"
+                  className={`import-btn${importMode === "file" ? " import-btn--active" : ""}`}
+                  onClick={() => setImportMode(importMode === "file" ? "idle" : "file")}
+                >
+                  📄 文字 / Word
+                </button>
+                <button
+                  type="button"
+                  className={`import-btn${importMode === "audio" ? " import-btn--active" : ""}`}
+                  onClick={() => setImportMode(importMode === "audio" ? "idle" : "audio")}
+                >
+                  🎵 音訊檔
+                </button>
+                <button
+                  type="button"
+                  className={`import-btn${importMode === "recording" ? " import-btn--active" : ""}`}
+                  onClick={() => { setImportMode(importMode === "recording" ? "idle" : "recording"); }}
+                >
+                  🎙 即時錄音
+                </button>
+              </div>
+
+              {importMode === "file" ? (
+                <div className="import-panel">
+                  <p className="import-panel__hint">支援 .txt、.docx 檔案，AI 將自動整理成會議記錄格式。</p>
+                  <input
+                    type="file"
+                    accept=".txt,.docx"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) void handleFileImport(file);
+                      e.target.value = "";
+                    }}
+                  />
+                </div>
+              ) : null}
+
+              {importMode === "audio" ? (
+                <div className="import-panel">
+                  <p className="import-panel__hint">支援 .mp3、.m4a、.wav、.webm，語音會先轉文字再由 AI 整理。</p>
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) void handleAudioImport(file, file.type);
+                      e.target.value = "";
+                    }}
+                  />
+                </div>
+              ) : null}
+
+              {importMode === "recording" ? (
+                <div className="import-panel">
+                  {isRecording ? (
+                    <button type="button" className="import-btn import-btn--danger" onClick={stopRecording}>
+                      ⏹ 停止錄音
+                    </button>
+                  ) : (
+                    <button type="button" className="import-btn" onClick={startRecording}>
+                      ⏺ 開始錄音
+                    </button>
+                  )}
+                </div>
+              ) : null}
+
+              {importStatus ? (
+                <p className={`import-status${importStatus.startsWith("匯入失敗") ? " import-status--error" : importStatus.startsWith("匯入完成") ? " import-status--ok" : ""}`}>
+                  {importStatus}
+                </p>
+              ) : null}
+
               <section className="meeting-form-section">
                 <h4>會議資訊</h4>
                 <div className="edit-grid">
                   {newMeetingInput("title", "會議名稱")}
+                  <label>
+                    所屬專案
+                    <select value={newMeetingRecord.project_id} onChange={(event) => setNewMeetingRecordValue("project_id", event.target.value)}>
+                      <option value="">未連結專案</option>
+                      {projects.map((project) => (
+                        <option key={project.id} value={project.id}>{project.name}</option>
+                      ))}
+                    </select>
+                  </label>
                   {newMeetingInput("meeting_date", "會議日期", "date")}
                   {newMeetingInput("meeting_method", "會議方式")}
                   {newMeetingInput("host", "主持人", "text", true)}
@@ -3237,7 +3556,7 @@ function App() {
                         </label>
                         <label>
                           期限
-                          <input value={todo.due} onChange={(event) => setMeetingTodoValue(index, "due", event.target.value)} />
+                          <input type="date" value={todo.due} onChange={(event) => setMeetingTodoValue(index, "due", event.target.value)} />
                         </label>
                         <label>
                           進度
