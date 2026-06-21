@@ -251,6 +251,122 @@ function getEditableMeetingNotes(notes: string | null) {
     .trim();
 }
 
+function parseMeetingRecordHtml(notes: string | null): NewMeetingRecordState {
+  const base = { ...emptyNewMeetingRecord, decisions: [{ ...emptyMeetingDecision }], todos: [{ ...emptyMeetingTodo }] };
+  if (!notes) return base;
+  const html = notes
+    .replace(FORMATTED_MEETING_NOTES_PREFIX, "")
+    .replace(STRUCTURED_MEETING_RECORD_PREFIX, "")
+    .trim();
+  if (!html) return base;
+
+  const doc = new DOMParser().parseFromString(html, "text/html");
+
+  function tableValue(container: Element | Document, label: string) {
+    const rows = container.querySelectorAll("tr");
+    for (const row of rows) {
+      const th = row.querySelector("th");
+      if (th && th.textContent?.trim() === label) {
+        return row.querySelector("td")?.innerHTML.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim() ?? "";
+      }
+    }
+    return "";
+  }
+
+  const h2s = doc.querySelectorAll("h2");
+  let section1: Element | null = null;
+  let section2: Element | null = null;
+  let section3: Element | null = null;
+  let section4: Element | null = null;
+
+  for (const h2 of h2s) {
+    const text = h2.textContent ?? "";
+    if (text.includes("一、")) section1 = h2;
+    else if (text.includes("二、")) section2 = h2;
+    else if (text.includes("三、")) section3 = h2;
+    else if (text.includes("四、")) section4 = h2;
+  }
+
+  function siblingTable(heading: Element | null) {
+    if (!heading) return null;
+    let el = heading.nextElementSibling;
+    while (el && el.tagName !== "TABLE" && el.tagName !== "H2") el = el.nextElementSibling;
+    return el?.tagName === "TABLE" ? el : null;
+  }
+
+  const t1 = siblingTable(section1);
+  const title = t1 ? tableValue(t1, "會議名稱") : (doc.querySelector("h1")?.textContent?.trim() ?? "");
+  const meeting_date = t1 ? tableValue(t1, "會議時間") : "";
+  const meeting_method = t1 ? tableValue(t1, "會議方式") : "";
+  const host = t1 ? tableValue(t1, "主持人") : "";
+  const attendees = t1 ? tableValue(t1, "與會人員") : "";
+  const pending_attendees = t1 ? tableValue(t1, "待確認出席") : "";
+
+  const decisions: NewMeetingDecisionRow[] = [];
+  if (section2) {
+    let el = section2.nextElementSibling;
+    while (el && el.tagName !== "H2") {
+      if (el.tagName === "H3") {
+        const topicRaw = el.textContent ?? "";
+        const topic = topicRaw.replace(/^決議\d+｜/, "").replace(/^決議\d+\|/, "").trim();
+        const table = el.nextElementSibling?.tagName === "TABLE" ? el.nextElementSibling : null;
+        decisions.push({
+          topic,
+          owner: table ? tableValue(table, "指定負責人") : "",
+          collaborators: table ? tableValue(table, "合作對象") : "",
+          schedule: table ? tableValue(table, "時間／進度") : "",
+          notes: table ? tableValue(table, "內容") : "",
+        });
+      }
+      el = el.nextElementSibling;
+    }
+  }
+
+  const todos: NewMeetingTodoRow[] = [];
+  if (section3) {
+    let el = section3.nextElementSibling;
+    while (el && el.tagName !== "H2") {
+      if (el.tagName === "TABLE") {
+        const bodyRows = el.querySelectorAll("tbody tr");
+        for (const row of bodyRows) {
+          const cells = row.querySelectorAll("td");
+          if (cells.length >= 2) {
+            todos.push({
+              owner: cells[0]?.textContent?.trim() ?? "",
+              task: cells[1]?.innerHTML.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim() ?? "",
+              due: cells[2]?.textContent?.trim() ?? "",
+            });
+          }
+        }
+      }
+      el = el.nextElementSibling;
+    }
+  }
+
+  const t4 = siblingTable(section4);
+  const next_meeting_date = t4 ? tableValue(t4, "時間") : "";
+  const next_meeting_method = t4 ? tableValue(t4, "方式") : "";
+  const next_meeting_topics = t4 ? tableValue(t4, "主要議題") : "";
+  const next_meeting_invitees = t4 ? tableValue(t4, "需邀請人員") : "";
+
+  return {
+    title,
+    meeting_date,
+    meeting_method,
+    host,
+    attendees,
+    pending_attendees,
+    google_meet_url: "",
+    notes_doc_url: "",
+    decisions: decisions.length > 0 ? decisions : [{ ...emptyMeetingDecision }],
+    todos: todos.length > 0 ? todos : [{ ...emptyMeetingTodo }],
+    next_meeting_date,
+    next_meeting_method,
+    next_meeting_topics,
+    next_meeting_invitees,
+  };
+}
+
 function normalizeMeetingNotesForSave(value: string | null | undefined, originalNotes: string | null | undefined) {
   const content = value?.trim();
   if (!content) return null;
@@ -396,6 +512,7 @@ function App() {
   const [kpiModal, setKpiModal] = useState<"total" | "due7" | "overdue" | "blocked" | null>(null);
   const [isAddingMeetingRecord, setIsAddingMeetingRecord] = useState(false);
   const [newMeetingRecord, setNewMeetingRecord] = useState<NewMeetingRecordState>(emptyNewMeetingRecord);
+  const [editingMeetingRecord, setEditingMeetingRecord] = useState<(NewMeetingRecordState & { id: string; google_meet_url: string; notes_doc_url: string }) | null>(null);
   const [isAddingAnnouncement, setIsAddingAnnouncement] = useState(false);
   const [newAnnouncement, setNewAnnouncement] = useState({ title: "", body: "" });
   const [isAddingCalendarEvent, setIsAddingCalendarEvent] = useState(false);
@@ -898,11 +1015,93 @@ function App() {
     setMeetingDetail((current) =>
       current?.meeting.id === meeting.id ? current : { meeting, decisions: [] },
     );
-    const editableMeeting: MeetingSummary = {
-      ...meeting,
-      notes: getEditableMeetingNotes(meeting.notes),
-    };
-    startEdit("meeting", editableMeeting);
+    const parsed = parseMeetingRecordHtml(meeting.notes);
+    setEditingMeetingRecord({
+      ...parsed,
+      id: meeting.id,
+      google_meet_url: meeting.google_meet_url ?? "",
+      notes_doc_url: meeting.notes_doc_url ?? "",
+    });
+    setSaveMessage("");
+  }
+
+  async function saveMeetingRecordEdit() {
+    if (!supabase || !editingMeetingRecord || !session?.access_token) return;
+    setSaveMessage("儲存中...");
+    const notesHtml = buildMeetingRecordHtml(editingMeetingRecord);
+    try {
+      const updatedMeeting = await updateSupabaseRow<MeetingSummary>(
+        "meetings",
+        editingMeetingRecord.id,
+        {
+          title: nullable(editingMeetingRecord.title),
+          meeting_date: nullable(editingMeetingRecord.meeting_date),
+          notes: `${FORMATTED_MEETING_NOTES_PREFIX}\n${STRUCTURED_MEETING_RECORD_PREFIX}\n${notesHtml}`,
+          google_meet_url: nullable(editingMeetingRecord.google_meet_url),
+          notes_doc_url: nullable(editingMeetingRecord.notes_doc_url),
+        },
+        "id,project_id,title,meeting_date,summary,notes,google_meet_url,notes_doc_url",
+      );
+      setMeetings((items) => items.map((item) => (item.id === editingMeetingRecord.id ? updatedMeeting : item)));
+      setMeetingDetail((current) =>
+        current?.meeting.id === editingMeetingRecord.id ? { ...current, meeting: updatedMeeting } : current,
+      );
+      setEditingMeetingRecord(null);
+      setSaveMessage("已儲存會議記錄。");
+    } catch (error) {
+      console.error(error);
+      setSaveMessage(error instanceof Error ? `儲存失敗：${error.message}` : "儲存失敗，請確認你有編輯權限。");
+    }
+  }
+
+  function setEditingMeetingRecordValue(field: keyof Omit<NewMeetingRecordState, "decisions" | "todos">, value: string) {
+    setEditingMeetingRecord((current) => current ? { ...current, [field]: value } : current);
+  }
+
+  function setEditingMeetingDecisionValue(index: number, field: keyof NewMeetingDecisionRow, value: string) {
+    setEditingMeetingRecord((current) => current ? {
+      ...current,
+      decisions: current.decisions.map((d, i) => i === index ? { ...d, [field]: value } : d),
+    } : current);
+  }
+
+  function addEditingMeetingDecisionRow() {
+    setEditingMeetingRecord((current) => current ? { ...current, decisions: [...current.decisions, { ...emptyMeetingDecision }] } : current);
+  }
+
+  function removeEditingMeetingDecisionRow(index: number) {
+    setEditingMeetingRecord((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        decisions: current.decisions.length > 1
+          ? current.decisions.filter((_, i) => i !== index)
+          : [{ ...emptyMeetingDecision }],
+      };
+    });
+  }
+
+  function setEditingMeetingTodoValue(index: number, field: keyof NewMeetingTodoRow, value: string) {
+    setEditingMeetingRecord((current) => current ? {
+      ...current,
+      todos: current.todos.map((t, i) => i === index ? { ...t, [field]: value } : t),
+    } : current);
+  }
+
+  function addEditingMeetingTodoRow() {
+    setEditingMeetingRecord((current) => current ? { ...current, todos: [...current.todos, { ...emptyMeetingTodo }] } : current);
+  }
+
+  function removeEditingMeetingTodoRow(index: number) {
+    setEditingMeetingRecord((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        todos: current.todos.length > 1
+          ? current.todos.filter((_, i) => i !== index)
+          : [{ ...emptyMeetingTodo }],
+      };
+    });
   }
 
   function cancelEdit() {
@@ -1232,14 +1431,14 @@ function App() {
   }
 
   function meetingEditActions(meeting: MeetingSummary) {
-    const active = isEditing("meeting", meeting.id);
+    const active = editingMeetingRecord?.id === meeting.id;
 
     return active ? (
       <div className="row-actions">
-        <button className="icon-button" type="button" onClick={saveEdit} title="儲存" aria-label="儲存">
+        <button className="icon-button" type="button" onClick={saveMeetingRecordEdit} title="儲存" aria-label="儲存">
           <Save size={16} />
         </button>
-        <button className="icon-button" type="button" onClick={cancelEdit} title="取消" aria-label="取消">
+        <button className="icon-button" type="button" onClick={() => { setEditingMeetingRecord(null); setSaveMessage(""); }} title="取消" aria-label="取消">
           <X size={16} />
         </button>
       </div>
@@ -1557,16 +1756,79 @@ function App() {
             </div>
           </div>
 
-          {isEditing("meeting", selectedMeeting.id) ? (
-            <section className="panel">
-              <div className="edit-grid">
-                {editInput("title", "會議標題")}
-                {editInput("meeting_date", "會議日期", "date")}
-                {editInput("google_meet_url", "Google Meet 連結")}
-                {editInput("notes_doc_url", "Google Doc 連結")}
-                {editTextarea("notes", "完整會議內容（可編輯全部文字與表格 HTML）")}
+          {editingMeetingRecord?.id === selectedMeeting.id ? (
+            <div className="add-meeting-form">
+              <section className="meeting-form-section">
+                <h3>會議基本資訊</h3>
+                <div className="edit-grid">
+                  <label>會議名稱<input value={editingMeetingRecord.title} onChange={(e) => setEditingMeetingRecordValue("title", e.target.value)} /></label>
+                  <label>會議日期<input type="date" value={editingMeetingRecord.meeting_date} onChange={(e) => setEditingMeetingRecordValue("meeting_date", e.target.value)} /></label>
+                  <label>會議方式<input value={editingMeetingRecord.meeting_method} onChange={(e) => setEditingMeetingRecordValue("meeting_method", e.target.value)} /></label>
+                  <label>主持人<input value={editingMeetingRecord.host} onChange={(e) => setEditingMeetingRecordValue("host", e.target.value)} /></label>
+                  <label>與會人員<textarea value={editingMeetingRecord.attendees} onChange={(e) => setEditingMeetingRecordValue("attendees", e.target.value)} /></label>
+                  <label>待確認出席<textarea value={editingMeetingRecord.pending_attendees} onChange={(e) => setEditingMeetingRecordValue("pending_attendees", e.target.value)} /></label>
+                  <label>Google Meet 連結<input type="url" value={editingMeetingRecord.google_meet_url} onChange={(e) => setEditingMeetingRecordValue("google_meet_url", e.target.value)} /></label>
+                  <label>Google Doc 連結<input type="url" value={editingMeetingRecord.notes_doc_url} onChange={(e) => setEditingMeetingRecordValue("notes_doc_url", e.target.value)} /></label>
+                </div>
+              </section>
+              <section className="meeting-form-section">
+                <div className="meeting-form-section__head">
+                  <h3>會議決議</h3>
+                  <button className="btn-add" type="button" onClick={addEditingMeetingDecisionRow}><Plus size={14} />新增決議</button>
+                </div>
+                <div className="meeting-form-list">
+                  {editingMeetingRecord.decisions.map((decision, index) => (
+                    <article className="meeting-form-card" key={`edit-decision-${index}`}>
+                      <div className="meeting-form-card__head">
+                        <span>決議 {index + 1}</span>
+                        <button className="icon-button" type="button" onClick={() => removeEditingMeetingDecisionRow(index)} title="移除此決議" aria-label="移除此決議"><X size={14} /></button>
+                      </div>
+                      <div className="edit-grid meeting-decision-grid">
+                        <label>事項主題<input value={decision.topic} onChange={(e) => setEditingMeetingDecisionValue(index, "topic", e.target.value)} /></label>
+                        <label>指定負責人<input value={decision.owner} onChange={(e) => setEditingMeetingDecisionValue(index, "owner", e.target.value)} /></label>
+                        <label>合作對象<input value={decision.collaborators} onChange={(e) => setEditingMeetingDecisionValue(index, "collaborators", e.target.value)} /></label>
+                        <label>時間／進度<input value={decision.schedule} onChange={(e) => setEditingMeetingDecisionValue(index, "schedule", e.target.value)} /></label>
+                        <label>內容備註<textarea value={decision.notes} onChange={(e) => setEditingMeetingDecisionValue(index, "notes", e.target.value)} /></label>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+              <section className="meeting-form-section">
+                <div className="meeting-form-section__head">
+                  <h3>待辦事項</h3>
+                  <button className="btn-add" type="button" onClick={addEditingMeetingTodoRow}><Plus size={14} />新增待辦</button>
+                </div>
+                <div className="meeting-form-list">
+                  {editingMeetingRecord.todos.map((todo, index) => (
+                    <article className="meeting-form-card" key={`edit-todo-${index}`}>
+                      <div className="meeting-form-card__head">
+                        <span>待辦 {index + 1}</span>
+                        <button className="icon-button" type="button" onClick={() => removeEditingMeetingTodoRow(index)} title="移除此待辦" aria-label="移除此待辦"><X size={14} /></button>
+                      </div>
+                      <div className="edit-grid meeting-todo-grid">
+                        <label>負責人<input value={todo.owner} onChange={(e) => setEditingMeetingTodoValue(index, "owner", e.target.value)} /></label>
+                        <label>待辦事項<textarea value={todo.task} onChange={(e) => setEditingMeetingTodoValue(index, "task", e.target.value)} /></label>
+                        <label>期限<input value={todo.due} onChange={(e) => setEditingMeetingTodoValue(index, "due", e.target.value)} /></label>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+              <section className="meeting-form-section">
+                <h3>下次會議</h3>
+                <div className="edit-grid">
+                  <label>時間<input value={editingMeetingRecord.next_meeting_date} onChange={(e) => setEditingMeetingRecordValue("next_meeting_date", e.target.value)} /></label>
+                  <label>方式<input value={editingMeetingRecord.next_meeting_method} onChange={(e) => setEditingMeetingRecordValue("next_meeting_method", e.target.value)} /></label>
+                  <label>主要議題<textarea value={editingMeetingRecord.next_meeting_topics} onChange={(e) => setEditingMeetingRecordValue("next_meeting_topics", e.target.value)} /></label>
+                  <label>需邀請人員<textarea value={editingMeetingRecord.next_meeting_invitees} onChange={(e) => setEditingMeetingRecordValue("next_meeting_invitees", e.target.value)} /></label>
+                </div>
+              </section>
+              <div className="form-actions">
+                <button type="button" onClick={saveMeetingRecordEdit}>儲存</button>
+                <button type="button" className="btn-cancel" onClick={() => { setEditingMeetingRecord(null); setSaveMessage(""); }}>取消</button>
               </div>
-            </section>
+            </div>
           ) : null}
 
           <section className="project-detail-grid">
