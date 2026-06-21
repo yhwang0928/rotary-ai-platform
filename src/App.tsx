@@ -289,6 +289,20 @@ function formatYearMonth(date: Date) {
   return `${date.getFullYear()}/${date.getMonth() + 1}`;
 }
 
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function startOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function addMonths(date: Date, months: number) {
+  return new Date(date.getFullYear(), date.getMonth() + months, 1);
+}
+
 function formatDateKey(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
@@ -796,17 +810,31 @@ function App() {
     const rangeEnd = new Date(lastDate ?? today);
     rangeEnd.setDate(rangeEnd.getDate() + (ganttScale === "week" ? 7 : 30));
     const totalDays = Math.max(daysBetween(rangeStart, rangeEnd), 1);
-    const stepDays = ganttScale === "week" ? 7 : 30;
-    const tickCount = Math.floor(totalDays / stepDays) + 1;
-    const ticks = Array.from({ length: tickCount + 1 }, (_value, index) => {
-      const offset = Math.min(stepDays * index, totalDays);
-      const date = new Date(rangeStart);
-      date.setDate(date.getDate() + offset);
-      return {
-        label: ganttScale === "week" ? formatMonthDay(date) : formatYearMonth(date),
-        left: `${(offset / totalDays) * 100}%`,
-      };
+    const makeTick = (date: Date, offset: number) => ({
+      label: ganttScale === "week" ? formatMonthDay(date) : formatYearMonth(date),
+      left: `${(offset / totalDays) * 100}%`,
+      align: offset === 0 ? "start" : offset === totalDays ? "end" : "center",
     });
+    const ticks = [makeTick(rangeStart, 0)];
+
+    if (ganttScale === "week") {
+      const stepDays = totalDays > 150 ? 28 : totalDays > 75 ? 14 : 7;
+      for (let offset = stepDays; offset < totalDays; offset += stepDays) {
+        ticks.push(makeTick(addDays(rangeStart, offset), offset));
+      }
+    } else {
+      let tickDate = startOfMonth(rangeStart);
+      if (tickDate <= rangeStart) tickDate = addMonths(tickDate, 1);
+      while (tickDate < rangeEnd) {
+        const offset = daysBetween(rangeStart, tickDate);
+        ticks.push(makeTick(tickDate, offset));
+        tickDate = addMonths(tickDate, 1);
+      }
+    }
+
+    if (!ticks.some((tick) => tick.align === "end")) {
+      ticks.push(makeTick(rangeEnd, totalDays));
+    }
 
     return { rows, rangeStart, totalDays, ticks };
   }, [ganttScale, projects, tasks]);
@@ -3002,7 +3030,11 @@ function App() {
                   <span>專案 / 起訖時間</span>
                   <div className="gantt-timeline">
                     {projectGantt.ticks.map((tick) => (
-                      <span className="gantt-tick" style={{ left: tick.left }} key={`${tick.label}-${tick.left}`}>
+                      <span
+                        className={`gantt-tick gantt-tick--${tick.align}`}
+                        style={{ left: tick.left }}
+                        key={`${tick.label}-${tick.left}`}
+                      >
                         {tick.label}
                       </span>
                     ))}
