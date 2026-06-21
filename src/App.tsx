@@ -802,7 +802,7 @@ function App() {
 
     if (error) {
       console.error(error);
-      setSaveMessage("新增公告失敗，請確認你有管理員權限。");
+      setSaveMessage("新增公告失敗，請確認你已登入且有公告新增權限。");
       return;
     }
 
@@ -819,7 +819,7 @@ function App() {
     const { error } = await supabase.from("announcements").delete().eq("id", id);
     if (error) {
       console.error(error);
-      setSaveMessage("刪除公告失敗，請確認你有管理員權限。");
+      setSaveMessage("刪除公告失敗，只有建立者或管理員可以刪除。");
       return;
     }
 
