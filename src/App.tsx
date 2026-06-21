@@ -878,7 +878,9 @@ function App() {
   }
 
   async function addMeetingRecord() {
-    if (!supabase || !newMeetingRecord.title.trim() || !newMeetingRecord.meeting_date) return;
+    if (!supabase) { setSaveMessage("Supabase 尚未連線。"); return; }
+    if (!newMeetingRecord.title.trim()) { setSaveMessage("請填寫會議名稱。"); return; }
+    if (!newMeetingRecord.meeting_date) { setSaveMessage("請填寫會議日期。"); return; }
 
     setSaveMessage("新增會議記錄中...");
     const notesHtml = buildMeetingRecordHtml(newMeetingRecord);
@@ -897,7 +899,12 @@ function App() {
 
     if (error) {
       console.error(error);
-      setSaveMessage("新增會議記錄失敗，請確認你有權限。");
+      setSaveMessage(`新增失敗：${error.message || error.code || JSON.stringify(error)}`);
+      return;
+    }
+
+    if (!data) {
+      setSaveMessage("新增失敗：沒有回傳資料，請確認 RLS 政策允許 INSERT。");
       return;
     }
 
