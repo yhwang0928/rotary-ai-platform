@@ -1966,7 +1966,6 @@ function App() {
             </article>
           ))}
         </div>
-        {document.source ? <p className="project-document-source">來源：{document.source}</p> : null}
       </section>
     );
   }
@@ -1982,7 +1981,6 @@ function App() {
         <div className="edit-grid">
           <label>文件標題<input value={editingProjectDocument.title} onChange={(e) => setEditingProjectDocumentValue("title", e.target.value)} /></label>
           <label>副標題<input value={editingProjectDocument.subtitle} onChange={(e) => setEditingProjectDocumentValue("subtitle", e.target.value)} /></label>
-          <label style={{ gridColumn: "1 / -1" }}>來源<input value={editingProjectDocument.source} onChange={(e) => setEditingProjectDocumentValue("source", e.target.value)} /></label>
         </div>
         <div className="project-document-editor-sections">
           {editingProjectDocument.sections.map((section, sectionIndex) => (
@@ -2475,6 +2473,10 @@ function App() {
                 {editInput("start_date", "預計啟動日期", "date")}
                 {editInput("expected_end_date", "預計完成日期", "date")}
                 {editInput("budget_range", "預算範圍")}
+              </div>
+              <div className="form-actions">
+                <button type="button" onClick={saveEdit}>儲存</button>
+                <button type="button" onClick={cancelEdit}>取消</button>
               </div>
             </section>
           ) : null}
