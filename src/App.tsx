@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileDown, FolderKanban, HardDrive, LogOut, Megaphone, Pencil, Plus, RefreshCw, Save, Upload, X } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { StatCard } from "./components/StatCard";
@@ -380,6 +380,7 @@ function App() {
   const [importingMeetingId, setImportingMeetingId] = useState<string | null>(null);
   const [driveRefreshKey, setDriveRefreshKey] = useState(0);
   const [driveSyncedAt, setDriveSyncedAt] = useState(() => new Date());
+  const meetingFormRef = useRef<HTMLDivElement | null>(null);
 
   const loadDashboardData = useCallback(async (showLoading = true) => {
     if (!supabase) return;
@@ -457,6 +458,13 @@ function App() {
 
     void loadDashboardData();
   }, [loadDashboardData, session]);
+
+  useEffect(() => {
+    if (!isAddingMeetingRecord) return;
+    window.setTimeout(() => {
+      meetingFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
+  }, [isAddingMeetingRecord]);
 
   const taskStats = useMemo(() => {
     const today = new Date();
@@ -2232,7 +2240,8 @@ function App() {
             <h2>會議記錄</h2>
             <div className="drive-actions">
               <button className="btn-add" type="button" onClick={() => setIsAddingMeetingRecord((current) => !current)}>
-                <Plus size={14} /> 新增會議記錄
+                {isAddingMeetingRecord ? <X size={14} /> : <Plus size={14} />}
+                {isAddingMeetingRecord ? "收合表單" : "新增會議記錄"}
               </button>
               <a className="btn-add" href={MEETING_RECORDS_FOLDER_URL} target="_blank" rel="noreferrer">
                 <ExternalLink size={14} /> 開啟資料夾
@@ -2241,7 +2250,7 @@ function App() {
           </div>
 
           {isAddingMeetingRecord ? (
-            <div className="add-meeting-form">
+            <div className="add-meeting-form" ref={meetingFormRef}>
               <section className="meeting-form-section">
                 <h4>會議資訊</h4>
                 <div className="edit-grid">
