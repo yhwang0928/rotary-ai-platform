@@ -96,6 +96,8 @@ type NewMeetingRecordState = {
   next_meeting_invitees: string;
 };
 
+const MEMBERS = ["Candice", "PT", "Vivian", "Kent", "Jake", "Eric", "CP AI", "Jim", "Wesley"];
+
 const APP_NAME = "3481 Rotary AI專案管理平台";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DRIVE_FOLDER_ID = "1fybSLObkJjwR4znh53tHQDEGHO5025XI";
@@ -1543,16 +1545,42 @@ function App() {
     );
   }
 
+  function memberChips(value: string, onChange: (v: string) => void) {
+    function toggle(name: string) {
+      const parts = value.split(/[、,，\s]+/).map((s) => s.trim()).filter(Boolean);
+      const idx = parts.indexOf(name);
+      const next = idx >= 0 ? parts.filter((_, i) => i !== idx) : [...parts, name];
+      onChange(next.join("、"));
+    }
+    const active = new Set(value.split(/[、,，\s]+/).map((s) => s.trim()).filter(Boolean));
+    return (
+      <div className="member-chips">
+        {MEMBERS.map((name) => (
+          <button
+            key={name}
+            type="button"
+            className={`member-chip${active.has(name) ? " member-chip--active" : ""}`}
+            onClick={() => toggle(name)}
+          >
+            {name}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
   function newMeetingInput(
     field: keyof Omit<NewMeetingRecordState, "decisions" | "todos">,
     label: string,
     type = "text",
+    withMemberList = false,
   ) {
     return (
       <label>
         {label}
         <input
           type={type}
+          list={withMemberList ? "rotary-members" : undefined}
           value={newMeetingRecord[field]}
           onChange={(event) => setNewMeetingRecordValue(field, event.target.value)}
         />
@@ -1560,15 +1588,22 @@ function App() {
     );
   }
 
-  function newMeetingTextarea(field: keyof Omit<NewMeetingRecordState, "decisions" | "todos">, label: string) {
+  function newMeetingTextarea(
+    field: keyof Omit<NewMeetingRecordState, "decisions" | "todos">,
+    label: string,
+    withChips = false,
+  ) {
     return (
-      <label>
-        {label}
-        <textarea
-          value={newMeetingRecord[field]}
-          onChange={(event) => setNewMeetingRecordValue(field, event.target.value)}
-        />
-      </label>
+      <div className="meeting-textarea-group">
+        <label>
+          {label}
+          <textarea
+            value={newMeetingRecord[field]}
+            onChange={(event) => setNewMeetingRecordValue(field, event.target.value)}
+          />
+        </label>
+        {withChips ? memberChips(String(newMeetingRecord[field]), (v) => setNewMeetingRecordValue(field, v)) : null}
+      </div>
     );
   }
 
@@ -1771,9 +1806,15 @@ function App() {
                   <label>會議名稱<input value={editingMeetingRecord.title} onChange={(e) => setEditingMeetingRecordValue("title", e.target.value)} /></label>
                   <label>會議日期<input type="date" value={editingMeetingRecord.meeting_date} onChange={(e) => setEditingMeetingRecordValue("meeting_date", e.target.value)} /></label>
                   <label>會議方式<input value={editingMeetingRecord.meeting_method} onChange={(e) => setEditingMeetingRecordValue("meeting_method", e.target.value)} /></label>
-                  <label>主持人<input value={editingMeetingRecord.host} onChange={(e) => setEditingMeetingRecordValue("host", e.target.value)} /></label>
-                  <label>與會人員<textarea value={editingMeetingRecord.attendees} onChange={(e) => setEditingMeetingRecordValue("attendees", e.target.value)} /></label>
-                  <label>待確認出席<textarea value={editingMeetingRecord.pending_attendees} onChange={(e) => setEditingMeetingRecordValue("pending_attendees", e.target.value)} /></label>
+                  <label>主持人<input list="rotary-members" value={editingMeetingRecord.host} onChange={(e) => setEditingMeetingRecordValue("host", e.target.value)} /></label>
+                  <div className="meeting-textarea-group">
+                    <label>與會人員<textarea value={editingMeetingRecord.attendees} onChange={(e) => setEditingMeetingRecordValue("attendees", e.target.value)} /></label>
+                    {memberChips(editingMeetingRecord.attendees, (v) => setEditingMeetingRecordValue("attendees", v))}
+                  </div>
+                  <div className="meeting-textarea-group">
+                    <label>待確認出席<textarea value={editingMeetingRecord.pending_attendees} onChange={(e) => setEditingMeetingRecordValue("pending_attendees", e.target.value)} /></label>
+                    {memberChips(editingMeetingRecord.pending_attendees, (v) => setEditingMeetingRecordValue("pending_attendees", v))}
+                  </div>
                   <label>Google Meet 連結<input type="url" value={editingMeetingRecord.google_meet_url} onChange={(e) => setEditingMeetingRecordValue("google_meet_url", e.target.value)} /></label>
                   <label>Google Doc 連結<input type="url" value={editingMeetingRecord.notes_doc_url} onChange={(e) => setEditingMeetingRecordValue("notes_doc_url", e.target.value)} /></label>
                 </div>
@@ -1792,8 +1833,8 @@ function App() {
                       </div>
                       <div className="edit-grid meeting-decision-grid">
                         <label>事項主題<input value={decision.topic} onChange={(e) => setEditingMeetingDecisionValue(index, "topic", e.target.value)} /></label>
-                        <label>指定負責人<input value={decision.owner} onChange={(e) => setEditingMeetingDecisionValue(index, "owner", e.target.value)} /></label>
-                        <label>合作對象<input value={decision.collaborators} onChange={(e) => setEditingMeetingDecisionValue(index, "collaborators", e.target.value)} /></label>
+                        <label>指定負責人<input list="rotary-members" value={decision.owner} onChange={(e) => setEditingMeetingDecisionValue(index, "owner", e.target.value)} /></label>
+                        <label>合作對象<input list="rotary-members" value={decision.collaborators} onChange={(e) => setEditingMeetingDecisionValue(index, "collaborators", e.target.value)} /></label>
                         <label>時間／進度<input value={decision.schedule} onChange={(e) => setEditingMeetingDecisionValue(index, "schedule", e.target.value)} /></label>
                         <label>內容備註<textarea value={decision.notes} onChange={(e) => setEditingMeetingDecisionValue(index, "notes", e.target.value)} /></label>
                       </div>
@@ -1814,7 +1855,7 @@ function App() {
                         <button className="icon-button" type="button" onClick={() => removeEditingMeetingTodoRow(index)} title="移除此待辦" aria-label="移除此待辦"><X size={14} /></button>
                       </div>
                       <div className="edit-grid meeting-todo-grid">
-                        <label>負責人<input value={todo.owner} onChange={(e) => setEditingMeetingTodoValue(index, "owner", e.target.value)} /></label>
+                        <label>負責人<input list="rotary-members" value={todo.owner} onChange={(e) => setEditingMeetingTodoValue(index, "owner", e.target.value)} /></label>
                         <label>待辦事項<textarea value={todo.task} onChange={(e) => setEditingMeetingTodoValue(index, "task", e.target.value)} /></label>
                         <label>期限<input value={todo.due} onChange={(e) => setEditingMeetingTodoValue(index, "due", e.target.value)} /></label>
                       </div>
@@ -1828,7 +1869,10 @@ function App() {
                   <label>時間<input value={editingMeetingRecord.next_meeting_date} onChange={(e) => setEditingMeetingRecordValue("next_meeting_date", e.target.value)} /></label>
                   <label>方式<input value={editingMeetingRecord.next_meeting_method} onChange={(e) => setEditingMeetingRecordValue("next_meeting_method", e.target.value)} /></label>
                   <label>主要議題<textarea value={editingMeetingRecord.next_meeting_topics} onChange={(e) => setEditingMeetingRecordValue("next_meeting_topics", e.target.value)} /></label>
-                  <label>需邀請人員<textarea value={editingMeetingRecord.next_meeting_invitees} onChange={(e) => setEditingMeetingRecordValue("next_meeting_invitees", e.target.value)} /></label>
+                  <div className="meeting-textarea-group">
+                    <label>需邀請人員<textarea value={editingMeetingRecord.next_meeting_invitees} onChange={(e) => setEditingMeetingRecordValue("next_meeting_invitees", e.target.value)} /></label>
+                    {memberChips(editingMeetingRecord.next_meeting_invitees, (v) => setEditingMeetingRecordValue("next_meeting_invitees", v))}
+                  </div>
                 </div>
               </section>
               <div className="form-actions">
@@ -2091,6 +2135,9 @@ function App() {
 
   return (
     <main className="shell">
+      <datalist id="rotary-members">
+        {MEMBERS.map((name) => <option key={name} value={name} />)}
+      </datalist>
       <header className="topbar">
         <div className="topbar-brand">
           <img src="/rotary-logo.png" alt="扶輪標誌" className="rotary-logo" />
@@ -2556,9 +2603,9 @@ function App() {
                   {newMeetingInput("title", "會議名稱")}
                   {newMeetingInput("meeting_date", "會議日期", "date")}
                   {newMeetingInput("meeting_method", "會議方式")}
-                  {newMeetingInput("host", "主持人")}
-                  {newMeetingTextarea("attendees", "與會人員")}
-                  {newMeetingTextarea("pending_attendees", "待確認出席")}
+                  {newMeetingInput("host", "主持人", "text", true)}
+                  {newMeetingTextarea("attendees", "與會人員", true)}
+                  {newMeetingTextarea("pending_attendees", "待確認出席", true)}
                   {newMeetingInput("google_meet_url", "Google Meet 連結", "url")}
                   {newMeetingInput("notes_doc_url", "Google Doc 連結", "url")}
                 </div>
@@ -2587,11 +2634,11 @@ function App() {
                         </label>
                         <label>
                           指定負責人
-                          <input value={decision.owner} onChange={(event) => setMeetingDecisionValue(index, "owner", event.target.value)} />
+                          <input list="rotary-members" value={decision.owner} onChange={(event) => setMeetingDecisionValue(index, "owner", event.target.value)} />
                         </label>
                         <label>
                           合作對象
-                          <input value={decision.collaborators} onChange={(event) => setMeetingDecisionValue(index, "collaborators", event.target.value)} />
+                          <input list="rotary-members" value={decision.collaborators} onChange={(event) => setMeetingDecisionValue(index, "collaborators", event.target.value)} />
                         </label>
                         <label>
                           時間／進度
@@ -2626,7 +2673,7 @@ function App() {
                       <div className="edit-grid meeting-todo-grid">
                         <label>
                           負責人
-                          <input value={todo.owner} onChange={(event) => setMeetingTodoValue(index, "owner", event.target.value)} />
+                          <input list="rotary-members" value={todo.owner} onChange={(event) => setMeetingTodoValue(index, "owner", event.target.value)} />
                         </label>
                         <label>
                           待辦事項
@@ -2648,7 +2695,7 @@ function App() {
                   {newMeetingInput("next_meeting_date", "時間")}
                   {newMeetingInput("next_meeting_method", "方式")}
                   {newMeetingTextarea("next_meeting_topics", "主要議題")}
-                  {newMeetingTextarea("next_meeting_invitees", "需邀請人員")}
+                  {newMeetingTextarea("next_meeting_invitees", "需邀請人員", true)}
                 </div>
               </section>
 

@@ -1297,6 +1297,40 @@ h4 {
   grid-template-columns: minmax(130px, 0.8fr) minmax(240px, 2fr) minmax(120px, 0.8fr);
 }
 
+.meeting-textarea-group {
+  display: grid;
+  gap: 6px;
+}
+
+.member-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.member-chip {
+  padding: 3px 10px;
+  border-radius: 99px;
+  border: 1px solid var(--gold-border);
+  background: var(--blue-card);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.member-chip:hover {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.member-chip--active {
+  background: var(--gold-dim);
+  border-color: var(--gold);
+  color: var(--gold);
+  font-weight: 600;
+}
+
 /* ── Task Table ── */
 .task-table { display: grid; gap: 6px; }
 
