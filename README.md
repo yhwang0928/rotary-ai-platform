@@ -44,6 +44,6 @@
 
 ## 目前範圍
 
-目前已包含 React 應用程式外殼、Supabase client、登入流程、儀表板讀取模型、核心資料表、RLS 政策、任務稽核觸發器，以及初始 Rotary AI 工作群組。
+目前已包含 React 應用程式外殼、Supabase client、登入流程、儀表板讀取模型、核心資料表、RLS 政策、任務稽核觸發器、初始 Rotary AI 工作群組，以及會議記錄的文字/Word、音檔、即時錄音匯入與 AI 彙整流程。
 
 Google Calendar/Meet、電子郵件提醒、任務表格內編輯、甘特圖與 Google Drive 索引是後續里程碑。

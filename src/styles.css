@@ -2005,6 +2005,10 @@ h4 {
 }
 
 .import-btn:hover { background: rgba(217, 179, 95, 0.22); }
+.import-btn:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
 .import-btn--active {
   background: rgba(217, 179, 95, 0.28);
   border-color: var(--gold);
@@ -2038,6 +2042,43 @@ h4 {
 .import-panel input[type="file"] {
   font-size: 0.82rem;
   color: var(--text-main);
+}
+
+.live-transcript {
+  flex: 1 1 100%;
+  min-width: 0;
+  border: 1px solid var(--gold-border);
+  border-radius: 8px;
+  background: var(--blue-panel);
+  overflow: hidden;
+}
+
+.live-transcript__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--gold-border);
+  color: var(--gold);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.live-transcript__head span {
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.live-transcript pre {
+  max-height: 180px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: var(--text-main);
+  font-size: 0.86rem;
+  line-height: 1.6;
 }
 
 .import-status {

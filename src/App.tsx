@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FolderKanban, HardDrive, LogOut, Megaphone, Pencil, Plus, RefreshCw, Save, X } from "lucide-react";
+import { ArrowLeft, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Circle, ExternalLink, FileText, FolderKanban, HardDrive, LogOut, Megaphone, Mic, Music, Pencil, Plus, RefreshCw, Save, Square, X } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { StatCard } from "./components/StatCard";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
@@ -153,6 +153,7 @@ const STRUCTURED_MEETING_RECORD_PREFIX = "<!-- rotary-structured-meeting-v1 -->"
 const STRUCTURED_PROJECT_DOCUMENT_PREFIX = "<!-- rotary-project-document-v1 -->";
 const MEETING_TODO_SYNC_PREFIX = "meeting-todo";
 const NEW_PROJECT_VALUE = "__new_project__";
+const RECORDING_TRANSCRIBE_INTERVAL_MS = 15000;
 const DRIVE_FOLDER_ID = "1fybSLObkJjwR4znh53tHQDEGHO5025XI";
 const DRIVE_FOLDER_URL = `https://drive.google.com/drive/u/3/folders/${DRIVE_FOLDER_ID}`;
 const DRIVE_FOLDER_EMBED_URL = `https://drive.google.com/embeddedfolderview?id=${DRIVE_FOLDER_ID}#list`;
@@ -670,8 +671,12 @@ function App() {
   const [importMode, setImportMode] = useState<"idle" | "file" | "audio" | "recording">("idle");
   const [importStatus, setImportStatus] = useState("");
   const [isRecording, setIsRecording] = useState(false);
+  const [isFinalizingRecording, setIsFinalizingRecording] = useState(false);
+  const [liveTranscript, setLiveTranscript] = useState("");
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTranscriptPartsRef = useRef<string[]>([]);
+  const recordingChunkJobsRef = useRef<Promise<void>[]>([]);
   const [newMeetingRecord, setNewMeetingRecord] = useState<NewMeetingRecordState>(emptyNewMeetingRecord);
   const [editingMeetingRecord, setEditingMeetingRecord] = useState<(NewMeetingRecordState & { id: string; google_meet_url: string; notes_doc_url: string }) | null>(null);
   const [editingMeetingHtml, setEditingMeetingHtml] = useState<MeetingHtmlEditState | null>(null);
@@ -1765,6 +1770,16 @@ function App() {
     return data.record;
   }
 
+  async function transcribeAudioBlob(blob: Blob, mimeType?: string) {
+    const formData = new FormData();
+    formData.append("audio", blob, `recording.${mimeType?.includes("webm") ? "webm" : mimeType?.includes("mp4") ? "mp4" : "mp3"}`);
+    const res = await fetch("/api/transcribe", { method: "POST", body: formData });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json() as { text?: string; error?: string };
+    if (data.error) throw new Error(data.error);
+    return data.text?.trim() ?? "";
+  }
+
   async function handleFileImport(file: File) {
     setImportStatus("讀取檔案中\u2026");
     try {
@@ -1787,14 +1802,9 @@ function App() {
   async function handleAudioImport(blob: Blob, mimeType?: string) {
     setImportStatus("語音上傳中\u2026");
     try {
-      const formData = new FormData();
-      formData.append("audio", blob, `recording.${mimeType?.includes("webm") ? "webm" : "mp3"}`);
-      const res = await fetch("/api/transcribe", { method: "POST", body: formData });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json() as { text?: string; error?: string };
-      if (data.error) throw new Error(data.error);
-      const text = data.text ?? "";
+      const text = await transcribeAudioBlob(blob, mimeType);
       if (!text.trim()) throw new Error("語音辨識結果為空");
+      setLiveTranscript(text);
       setImportStatus(`語音辨識完成，共 ${text.length} 字。AI 整理中\u2026`);
       const record = await callParseApi(text);
       await applyImportedRecord(record);
@@ -1815,21 +1825,61 @@ function App() {
   function startRecording() {
     navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
       audioChunksRef.current = [];
+      recordingTranscriptPartsRef.current = [];
+      recordingChunkJobsRef.current = [];
+      setLiveTranscript("");
+      setIsFinalizingRecording(false);
       const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
       const mr = new MediaRecorder(stream, { mimeType });
-      mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
-      mr.onstop = () => {
+      mr.ondataavailable = (e) => {
+        if (e.data.size === 0) return;
+        audioChunksRef.current.push(e.data);
+        const chunkIndex = recordingTranscriptPartsRef.current.length;
+        recordingTranscriptPartsRef.current.push("");
+        const job = transcribeAudioBlob(e.data, mimeType)
+          .then((text) => {
+            if (!text) return;
+            recordingTranscriptPartsRef.current[chunkIndex] = text;
+            const transcript = recordingTranscriptPartsRef.current.filter(Boolean).join("\n");
+            setLiveTranscript(transcript);
+            setImportStatus(`錄音中\u2026 已即時轉錄 ${transcript.length} 字`);
+          })
+          .catch((err) => {
+            console.error(err);
+            setImportStatus(`部分錄音片段轉錄失敗：${err instanceof Error ? err.message : String(err)}`);
+          });
+        recordingChunkJobsRef.current.push(job);
+      };
+      mr.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
+        setIsFinalizingRecording(true);
+        setImportStatus("停止錄音，正在完成最後片段轉錄\u2026");
         const blob = new Blob(audioChunksRef.current, { type: mimeType });
         const ext = mimeType.includes("webm") ? "webm" : "mp4";
         const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
         downloadBlob(blob, `meeting-recording-${ts}.${ext}`);
-        void handleAudioImport(blob, mimeType);
+        await Promise.allSettled(recordingChunkJobsRef.current);
+        const transcript = recordingTranscriptPartsRef.current.filter(Boolean).join("\n").trim();
+        if (!transcript) {
+          setIsFinalizingRecording(false);
+          setImportStatus("語音辨識結果為空，請確認麥克風或重新錄音。");
+          return;
+        }
+        setLiveTranscript(transcript);
+        setImportStatus(`即時轉錄完成，共 ${transcript.length} 字。AI 整理中\u2026`);
+        try {
+          const record = await callParseApi(transcript);
+          await applyImportedRecord(record);
+        } catch (err) {
+          setImportStatus(`匯入失敗：${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+          setIsFinalizingRecording(false);
+        }
       };
-      mr.start();
+      mr.start(RECORDING_TRANSCRIBE_INTERVAL_MS);
       mediaRecorderRef.current = mr;
       setIsRecording(true);
-      setImportStatus("錄音中\u2026 點擊「停止錄音」完成");
+      setImportStatus("錄音中\u2026 系統會每 15 秒自動轉錄片段");
     }).catch(() => setImportStatus("無法存取麥克風，請確認瀏覽器權限。"));
   }
 
@@ -3565,21 +3615,21 @@ function App() {
                   className={`import-btn${importMode === "file" ? " import-btn--active" : ""}`}
                   onClick={() => setImportMode(importMode === "file" ? "idle" : "file")}
                 >
-                  📄 文字 / Word
+                  <FileText size={14} />文字 / Word
                 </button>
                 <button
                   type="button"
                   className={`import-btn${importMode === "audio" ? " import-btn--active" : ""}`}
                   onClick={() => setImportMode(importMode === "audio" ? "idle" : "audio")}
                 >
-                  🎵 音訊檔
+                  <Music size={14} />音訊檔
                 </button>
                 <button
                   type="button"
                   className={`import-btn${importMode === "recording" ? " import-btn--active" : ""}`}
                   onClick={() => { setImportMode(importMode === "recording" ? "idle" : "recording"); }}
                 >
-                  🎙 即時錄音
+                  <Mic size={14} />即時錄音
                 </button>
               </div>
 
@@ -3617,13 +3667,23 @@ function App() {
                 <div className="import-panel">
                   {isRecording ? (
                     <button type="button" className="import-btn import-btn--danger" onClick={stopRecording}>
-                      ⏹ 停止錄音
+                      <Square size={14} />停止錄音
                     </button>
                   ) : (
-                    <button type="button" className="import-btn" onClick={startRecording}>
-                      ⏺ 開始錄音
+                    <button type="button" className="import-btn" onClick={startRecording} disabled={isFinalizingRecording}>
+                      <Circle size={14} />開始錄音
                     </button>
                   )}
+                  <p className="import-panel__hint">錄音時會每 15 秒送出一個片段轉文字；停止後會自動彙整成下方會議記錄欄位。</p>
+                  {liveTranscript ? (
+                    <div className="live-transcript" aria-live="polite">
+                      <div className="live-transcript__head">
+                        <strong>即時逐字稿</strong>
+                        <span>{liveTranscript.length} 字</span>
+                      </div>
+                      <pre>{liveTranscript}</pre>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 
