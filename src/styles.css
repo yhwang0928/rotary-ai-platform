@@ -1603,8 +1603,14 @@ h4 {
   font-weight: 600;
 }
 
+.meeting-decision-grid,
 .meeting-todo-grid {
-  grid-template-columns: minmax(130px, 0.8fr) minmax(240px, 2fr) minmax(120px, 0.8fr) minmax(120px, 0.7fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+}
+
+.meeting-form-field--full {
+  grid-column: 1 / -1;
 }
 
 .meeting-textarea-group {
@@ -1715,6 +1721,7 @@ h4 {
 
 .edit-grid label {
   display: grid;
+  align-content: start;
   gap: 5px;
   color: var(--text-muted);
   font-size: 0.78rem;
@@ -1733,6 +1740,15 @@ h4 {
   padding: 7px 9px;
   color: var(--white);
   background: var(--white-10);
+}
+
+.meeting-form-card .edit-grid input,
+.meeting-form-card .edit-grid select {
+  height: 38px;
+}
+
+.meeting-form-card .edit-grid textarea {
+  min-height: 92px;
 }
 
 .edit-grid input:focus,
@@ -1905,6 +1921,7 @@ h4 {
   .topbar { align-items: flex-start; }
   .calendar-layout { grid-template-columns: 1fr; }
   .project-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .meeting-decision-grid,
   .meeting-todo-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .detail-table__head,
   .detail-table__row {
@@ -1923,6 +1940,7 @@ h4 {
   .rotary-logo { width: auto; height: 56px; padding: 6px 10px; }
   .task-table__head, .task-table__row { grid-template-columns: minmax(0,1fr); gap: 6px; }
   .edit-grid { grid-template-columns: 1fr; }
+  .meeting-decision-grid,
   .meeting-todo-grid { grid-template-columns: 1fr; }
   .calendar-heading-actions {
     width: 100%;

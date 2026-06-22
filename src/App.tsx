@@ -68,14 +68,20 @@ type NewCalendarEventState = {
   description: string;
 };
 type NewMeetingDecisionRow = {
+  project_id: string;
+  project_name: string;
   topic: string;
   owner: string;
   collaborators: string;
   schedule: string;
+  status: "doing" | "review" | "done";
   notes: string;
 };
 type NewMeetingTodoRow = {
+  project_id: string;
+  project_name: string;
   owner: string;
+  collaborators: string;
   task: string;
   due: string;
   status: "doing" | "done";
@@ -117,14 +123,10 @@ type ProjectDocument = {
 };
 type NewMeetingRecordState = {
   title: string;
-  project_id: string;
   meeting_date: string;
   meeting_method: string;
   host: string;
   attendees: string;
-  pending_attendees: string;
-  google_meet_url: string;
-  notes_doc_url: string;
   decisions: NewMeetingDecisionRow[];
   todos: NewMeetingTodoRow[];
   next_meeting_date: string;
@@ -150,6 +152,7 @@ const FORMATTED_MEETING_NOTES_PREFIX = "<!-- rotary-meeting-html-v1 -->";
 const STRUCTURED_MEETING_RECORD_PREFIX = "<!-- rotary-structured-meeting-v1 -->";
 const STRUCTURED_PROJECT_DOCUMENT_PREFIX = "<!-- rotary-project-document-v1 -->";
 const MEETING_TODO_SYNC_PREFIX = "meeting-todo";
+const NEW_PROJECT_VALUE = "__new_project__";
 const DRIVE_FOLDER_ID = "1fybSLObkJjwR4znh53tHQDEGHO5025XI";
 const DRIVE_FOLDER_URL = `https://drive.google.com/drive/u/3/folders/${DRIVE_FOLDER_ID}`;
 const DRIVE_FOLDER_EMBED_URL = `https://drive.google.com/embeddedfolderview?id=${DRIVE_FOLDER_ID}#list`;
@@ -193,6 +196,12 @@ const meetingTodoStatusLabels: Record<NewMeetingTodoRow["status"], string> = {
   done: "已完成",
 };
 const meetingTodoStatusOptions = Object.entries(meetingTodoStatusLabels) as Array<[NewMeetingTodoRow["status"], string]>;
+const meetingDecisionStatusLabels: Record<NewMeetingDecisionRow["status"], string> = {
+  doing: "進行中",
+  review: "驗收中",
+  done: "已結案",
+};
+const meetingDecisionStatusOptions = Object.entries(meetingDecisionStatusLabels) as Array<[NewMeetingDecisionRow["status"], string]>;
 const projectFeatureStatusLabels: Record<ProjectDocumentFeature["status"], string> = {
   todo: "待確認",
   doing: "規劃中",
@@ -242,28 +251,30 @@ const emptyNewCalendarEvent: NewCalendarEventState = {
   description: "",
 };
 const emptyMeetingDecision: NewMeetingDecisionRow = {
+  project_id: "",
+  project_name: "",
   topic: "",
   owner: "",
   collaborators: "",
   schedule: "",
+  status: "doing",
   notes: "",
 };
 const emptyMeetingTodo: NewMeetingTodoRow = {
+  project_id: "",
+  project_name: "",
   owner: "",
+  collaborators: "",
   task: "",
   due: "",
   status: "doing",
 };
 const emptyNewMeetingRecord: NewMeetingRecordState = {
   title: "",
-  project_id: "",
   meeting_date: "",
   meeting_method: "線上會議",
   host: "",
   attendees: "",
-  pending_attendees: "",
-  google_meet_url: "",
-  notes_doc_url: "",
   decisions: [{ ...emptyMeetingDecision }],
   todos: [{ ...emptyMeetingTodo }],
   next_meeting_date: "",
@@ -366,7 +377,6 @@ function parseMeetingRecordHtml(notes: string | null): NewMeetingRecordState {
   const meeting_method = t1 ? tableValue(t1, "會議方式") : "";
   const host = t1 ? tableValue(t1, "主持人") : "";
   const attendees = t1 ? tableValue(t1, "與會人員") : "";
-  const pending_attendees = t1 ? tableValue(t1, "待確認出席") : "";
 
   const decisions: NewMeetingDecisionRow[] = [];
   if (section2) {
@@ -376,11 +386,15 @@ function parseMeetingRecordHtml(notes: string | null): NewMeetingRecordState {
         const topicRaw = el.textContent ?? "";
         const topic = topicRaw.replace(/^決議\d+｜/, "").replace(/^決議\d+\|/, "").trim();
         const table = el.nextElementSibling?.tagName === "TABLE" ? el.nextElementSibling : null;
+        const rawStatus = table ? tableValue(table, "進度") || tableValue(table, "時間／進度") : "";
         decisions.push({
+          project_id: "",
+          project_name: table ? tableValue(table, "所屬專案") : "",
           topic,
           owner: table ? tableValue(table, "指定負責人") : "",
           collaborators: table ? tableValue(table, "合作對象") : "",
-          schedule: table ? tableValue(table, "時間／進度") : "",
+          schedule: table ? tableValue(table, "項目預計完成時間") || tableValue(table, "時間／進度") : "",
+          status: rawStatus.includes("驗收") ? "review" : rawStatus.includes("結案") || rawStatus.includes("完成") ? "done" : "doing",
           notes: table ? tableValue(table, "內容") : "",
         });
       }
@@ -397,11 +411,15 @@ function parseMeetingRecordHtml(notes: string | null): NewMeetingRecordState {
         for (const row of bodyRows) {
           const cells = row.querySelectorAll("td");
           if (cells.length >= 2) {
-            const rawStatus = cells[3]?.textContent?.trim() ?? "";
+            const hasProjectColumns = cells.length >= 6;
+            const rawStatus = cells[hasProjectColumns ? 5 : 3]?.textContent?.trim() ?? "";
             todos.push({
-              owner: cells[0]?.textContent?.trim() ?? "",
-              task: cells[1]?.innerHTML.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim() ?? "",
-              due: normalizeMeetingTodoDueDate(cells[2]?.textContent?.trim() ?? "", meeting_date) ?? "",
+              project_id: "",
+              project_name: hasProjectColumns ? cells[0]?.textContent?.trim() ?? "" : "",
+              owner: cells[hasProjectColumns ? 1 : 0]?.textContent?.trim() ?? "",
+              collaborators: hasProjectColumns ? cells[2]?.textContent?.trim() ?? "" : "",
+              task: cells[hasProjectColumns ? 3 : 1]?.innerHTML.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim() ?? "",
+              due: normalizeMeetingTodoDueDate(cells[hasProjectColumns ? 4 : 2]?.textContent?.trim() ?? "", meeting_date) ?? "",
               status: rawStatus.includes("完成") ? "done" : "doing",
             });
           }
@@ -419,14 +437,10 @@ function parseMeetingRecordHtml(notes: string | null): NewMeetingRecordState {
 
   return {
     title,
-    project_id: "",
     meeting_date,
     meeting_method,
     host,
     attendees,
-    pending_attendees,
-    google_meet_url: "",
-    notes_doc_url: "",
     decisions: decisions.length > 0 ? decisions : [{ ...emptyMeetingDecision }],
     todos: todos.length > 0 ? todos : [{ ...emptyMeetingTodo }],
     next_meeting_date,
@@ -515,26 +529,26 @@ function buildMeetingRecordHtml(record: NewMeetingRecordState) {
     ["會議名稱", record.title],
     ["會議時間", record.meeting_date],
     ["會議方式", record.meeting_method],
-    ["主持人", record.host],
     ["與會人員", record.attendees],
-    ["待確認出席", record.pending_attendees],
   ]);
   const decisionSections = record.decisions
     .filter((decision) => Object.values(decision).some((value) => value.trim()))
     .map((decision, index) => {
       const rows = tableRows([
+        ["所屬專案", decision.project_name],
         ["指定負責人", decision.owner],
         ["合作對象", decision.collaborators],
-        ["時間／進度", decision.schedule],
+        ["進度", meetingDecisionStatusLabels[decision.status] ?? meetingDecisionStatusLabels.doing],
+        ["項目預計完成時間", decision.schedule],
         ["內容", decision.notes],
       ]);
       return `<h3>決議${index + 1}｜${escapeHtml(decision.topic || "未命名事項")}</h3><table><tbody>${rows}</tbody></table>`;
     })
     .join("");
   const todoRows = record.todos
-    .filter((todo) => [todo.owner, todo.task, todo.due].some((value) => value.trim()))
+    .filter((todo) => [todo.project_name, todo.owner, todo.collaborators, todo.task, todo.due].some((value) => value.trim()))
     .map((todo) =>
-      `<tr><td>${escapeHtml(todo.owner)}</td><td>${escapeHtml(todo.task).replace(/\n/g, "<br>")}</td><td>${escapeHtml(todo.due)}</td><td>${escapeHtml(meetingTodoStatusLabels[todo.status] ?? meetingTodoStatusLabels.doing)}</td></tr>`,
+      `<tr><td>${escapeHtml(todo.project_name)}</td><td>${escapeHtml(todo.owner)}</td><td>${escapeHtml(todo.collaborators)}</td><td>${escapeHtml(todo.task).replace(/\n/g, "<br>")}</td><td>${escapeHtml(todo.due)}</td><td>${escapeHtml(meetingTodoStatusLabels[todo.status] ?? meetingTodoStatusLabels.doing)}</td></tr>`,
     )
     .join("");
   const nextMeetingRows = tableRows([
@@ -548,7 +562,7 @@ function buildMeetingRecordHtml(record: NewMeetingRecordState) {
     `<h1>${escapeHtml(title)}</h1>`,
     meetingInfoRows ? `<h2>一、會議資訊</h2><table><tbody>${meetingInfoRows}</tbody></table>` : "",
     decisionSections ? `<h2>二、會議決議</h2>${decisionSections}` : "",
-    todoRows ? `<h2>三、待辦事項 To Do</h2><table><thead><tr><th>負責人</th><th>待辦事項</th><th>期限</th><th>狀態</th></tr></thead><tbody>${todoRows}</tbody></table>` : "",
+    todoRows ? `<h2>三、待辦事項 To Do</h2><table><thead><tr><th>所屬專案</th><th>負責人</th><th>合作對象</th><th>待辦事項</th><th>期限</th><th>狀態</th></tr></thead><tbody>${todoRows}</tbody></table>` : "",
     nextMeetingRows ? `<h2>四、下次會議</h2><table><tbody>${nextMeetingRows}</tbody></table>` : "",
   ]
     .filter(Boolean)
@@ -962,6 +976,94 @@ function App() {
     }
   }
 
+  function applyProjectDefaults<T extends { project_id: string; project_name: string; owner: string; collaborators: string }>(
+    row: T,
+    projectId: string,
+  ): T {
+    if (!projectId) return { ...row, project_id: "", project_name: "" };
+    if (projectId === NEW_PROJECT_VALUE) {
+      return { ...row, project_id: NEW_PROJECT_VALUE, project_name: "", owner: "", collaborators: "" };
+    }
+    const project = projects.find((item) => item.id === projectId);
+    if (!project) return { ...row, project_id: projectId };
+    return {
+      ...row,
+      project_id: project.id,
+      project_name: project.name,
+      owner: project.owner_names ?? "",
+      collaborators: project.participating_units ?? "",
+    };
+  }
+
+  function hydrateMeetingRowProject<T extends { project_id: string; project_name: string }>(row: T): T {
+    if (row.project_id) return row;
+    const projectName = row.project_name.trim();
+    if (!projectName) return row;
+    const project = projects.find((item) => item.name.trim() === projectName);
+    return project
+      ? { ...row, project_id: project.id, project_name: project.name }
+      : { ...row, project_id: NEW_PROJECT_VALUE };
+  }
+
+  function hydrateMeetingRecordProjects(record: NewMeetingRecordState): NewMeetingRecordState {
+    return {
+      ...record,
+      decisions: record.decisions.map(hydrateMeetingRowProject),
+      todos: record.todos.map(hydrateMeetingRowProject),
+    };
+  }
+
+  async function createProjectFromMeeting(projectName: string) {
+    if (!supabase) throw new Error("Supabase 尚未連線。");
+    const name = projectName.trim();
+    const slugBase = slugify(name);
+    const slug = slugBase || `meeting-project-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const { data, error } = await supabase
+      .from("projects")
+      .insert({
+        name,
+        slug,
+        description: null,
+        status: "active",
+        project_purpose: null,
+        project_background: null,
+        participating_units: null,
+        owner_names: null,
+      })
+      .select("id,name,slug,description,status,owner_names,project_purpose,project_background,participating_units,start_date,expected_end_date,budget_range,google_drive_folder_url,drive_folder_label,drive_folder_purpose,updated_at")
+      .single();
+    if (error) throw error;
+    const project = data as ProjectSummary;
+    setProjects((current) => [...current, project].sort((a, b) => a.name.localeCompare(b.name, "zh-Hant")));
+    return project;
+  }
+
+  async function resolveMeetingRecordProjects(record: NewMeetingRecordState) {
+    const projectByName = new Map(projects.map((project) => [project.name.trim(), project]));
+    const createdByName = new Map<string, ProjectSummary>();
+
+    async function resolveRowProject<T extends { project_id: string; project_name: string }>(row: T): Promise<T> {
+      const projectName = row.project_name.trim();
+      if (row.project_id && row.project_id !== NEW_PROJECT_VALUE) {
+        const project = projects.find((item) => item.id === row.project_id);
+        return project ? { ...row, project_name: project.name } : row;
+      }
+      if (!projectName) return { ...row, project_id: "" };
+
+      const existing = projectByName.get(projectName);
+      if (existing) return { ...row, project_id: existing.id, project_name: existing.name };
+
+      const created = createdByName.get(projectName) ?? await createProjectFromMeeting(projectName);
+      createdByName.set(projectName, created);
+      projectByName.set(created.name.trim(), created);
+      return { ...row, project_id: created.id, project_name: created.name };
+    }
+
+    const decisions = await Promise.all(record.decisions.map(resolveRowProject));
+    const todos = await Promise.all(record.todos.map(resolveRowProject));
+    return { ...record, decisions, todos };
+  }
+
   async function syncMeetingTodosToTasksAndCalendar(meeting: MeetingSummary, record: NewMeetingRecordState) {
     if (!supabase) throw new Error("Supabase 尚未連線。");
 
@@ -988,12 +1090,12 @@ function App() {
       .like("description", `[${syncKey}]%`);
     if (calendarDeleteError) throw calendarDeleteError;
 
-    if (!record.project_id || todos.length === 0) {
+    if (todos.length === 0) {
       return { taskCount: 0, calendarCount: 0 };
     }
 
-    const taskRows = todos.map((todo) => ({
-      project_id: record.project_id,
+    const taskRows = todos.filter((todo) => todo.project_id).map((todo) => ({
+      project_id: todo.project_id,
       title: todo.task,
       status: todo.status === "done" ? "done" : "doing",
       priority: "p2",
@@ -1001,23 +1103,27 @@ function App() {
       due_date: todo.dueDate,
       completed_date: todo.status === "done" ? todo.dueDate ?? record.meeting_date ?? meeting.meeting_date : null,
       owner_names: nullable(todo.owner),
-      collaborator_names: null,
+      collaborator_names: nullable(todo.collaborators),
       output_title: null,
       blocker_reason: null,
       source_sheet: syncKey,
       source_row: todo.index + 1,
     }));
 
-    const { data: insertedTasks, error: taskInsertError } = await supabase
-      .from("tasks")
-      .insert(taskRows)
-      .select("id,project_id,title,status,priority,start_date,due_date,completed_date,blocker_reason,owner_names,collaborator_names,output_title");
-    if (taskInsertError) throw taskInsertError;
+    let insertedTasks: TaskSummary[] = [];
+    if (taskRows.length > 0) {
+      const { data, error: taskInsertError } = await supabase
+        .from("tasks")
+        .insert(taskRows)
+        .select("id,project_id,title,status,priority,start_date,due_date,completed_date,blocker_reason,owner_names,collaborator_names,output_title");
+      if (taskInsertError) throw taskInsertError;
+      insertedTasks = (data ?? []) as TaskSummary[];
+    }
 
     const calendarRows = todos
-      .filter((todo) => todo.dueDate)
+      .filter((todo) => todo.project_id && todo.dueDate)
       .map((todo) => ({
-        project_id: record.project_id,
+        project_id: todo.project_id,
         title: `待辦：${todo.task}`,
         event_date: todo.dueDate as string,
         location: null,
@@ -1036,8 +1142,8 @@ function App() {
     }
 
     setTasks((current) => [
-      ...current.filter((task) => !insertedTasks?.some((inserted) => inserted.id === task.id)),
-      ...((insertedTasks ?? []) as TaskSummary[]),
+      ...current.filter((task) => !insertedTasks.some((inserted) => inserted.id === task.id)),
+      ...insertedTasks,
     ]);
     setCalendarEvents((current) =>
       [
@@ -1046,7 +1152,7 @@ function App() {
       ].sort((a, b) => a.event_date.localeCompare(b.event_date)),
     );
 
-    return { taskCount: insertedTasks?.length ?? 0, calendarCount: insertedCalendarEvents.length };
+    return { taskCount: insertedTasks.length, calendarCount: insertedCalendarEvents.length };
   }
 
   async function signIn(event: React.FormEvent<HTMLFormElement>) {
@@ -1094,23 +1200,31 @@ function App() {
     if (!supabase) { setSaveMessage("Supabase 尚未連線。"); return; }
     if (!newMeetingRecord.title.trim()) { setSaveMessage("請填寫會議名稱。"); return; }
     if (!newMeetingRecord.meeting_date) { setSaveMessage("請填寫會議日期。"); return; }
-    if (newMeetingRecord.todos.some((todo) => todo.task.trim()) && !newMeetingRecord.project_id) {
-      setSaveMessage("有待辦事項時，請先選擇所屬專案，才能同步到任務與行事曆。");
+    if (newMeetingRecord.todos.some((todo) => todo.task.trim() && !todo.project_id && !todo.project_name.trim())) {
+      setSaveMessage("待辦事項請選擇所屬專案，或輸入新增專案名稱。");
       return;
     }
 
     setSaveMessage("新增會議記錄中...");
-    const notesHtml = buildMeetingRecordHtml(newMeetingRecord);
+    let recordForSave = newMeetingRecord;
+    try {
+      recordForSave = await resolveMeetingRecordProjects(newMeetingRecord);
+    } catch (projectError) {
+      console.error(projectError);
+      setSaveMessage(projectError instanceof Error ? `新增專案失敗：${projectError.message}` : "新增專案失敗，請確認你有新增專案權限。");
+      return;
+    }
+    const notesHtml = buildMeetingRecordHtml(recordForSave);
     const { data, error } = await supabase
       .from("meetings")
       .insert({
         title: newMeetingRecord.title.trim(),
-        project_id: nullable(newMeetingRecord.project_id),
+        project_id: null,
         meeting_date: newMeetingRecord.meeting_date,
         summary: null,
         notes: `${FORMATTED_MEETING_NOTES_PREFIX}\n${STRUCTURED_MEETING_RECORD_PREFIX}\n${notesHtml}`,
-        google_meet_url: nullable(newMeetingRecord.google_meet_url),
-        notes_doc_url: nullable(newMeetingRecord.notes_doc_url),
+        google_meet_url: null,
+        notes_doc_url: null,
       })
       .select("id,project_id,title,meeting_date,summary,notes,google_meet_url,notes_doc_url")
       .single();
@@ -1129,7 +1243,7 @@ function App() {
     const meeting = data as MeetingSummary;
     setMeetings((current) => [meeting, ...current]);
     try {
-      const syncResult = await syncMeetingTodosToTasksAndCalendar(meeting, newMeetingRecord);
+      const syncResult = await syncMeetingTodosToTasksAndCalendar(meeting, recordForSave);
       await loadDashboardData(false);
       setSaveMessage(`已新增會議記錄，並同步 ${syncResult.taskCount} 筆待辦、${syncResult.calendarCount} 筆行事曆。`);
     } catch (syncError) {
@@ -1367,11 +1481,10 @@ function App() {
     setMeetingDetail((current) =>
       current?.meeting.id === meeting.id ? current : { meeting, decisions: [] },
     );
-    const parsed = parseMeetingRecordHtml(meeting.notes);
+    const parsed = hydrateMeetingRecordProjects(parseMeetingRecordHtml(meeting.notes));
     setEditingMeetingRecord({
       ...parsed,
       id: meeting.id,
-      project_id: meeting.project_id ?? "",
       title: meeting.title,
       meeting_date: meeting.meeting_date,
       google_meet_url: meeting.google_meet_url ?? "",
@@ -1428,23 +1541,24 @@ function App() {
 
   async function saveMeetingRecordEdit() {
     if (!supabase || !editingMeetingRecord || !session?.access_token) return;
-    if (editingMeetingRecord.todos.some((todo) => todo.task.trim()) && !editingMeetingRecord.project_id) {
-      setSaveMessage("有待辦事項時，請先選擇所屬專案，才能同步到任務與行事曆。");
+    if (editingMeetingRecord.todos.some((todo) => todo.task.trim() && !todo.project_id && !todo.project_name.trim())) {
+      setSaveMessage("待辦事項請選擇所屬專案，或輸入新增專案名稱。");
       return;
     }
     setSaveMessage("儲存中...");
-    const notesHtml = buildMeetingRecordHtml(editingMeetingRecord);
     try {
+      const recordForSave = await resolveMeetingRecordProjects(editingMeetingRecord);
+      const notesHtml = buildMeetingRecordHtml(recordForSave);
       const updatedMeeting = await updateSupabaseRow<MeetingSummary>(
         "meetings",
         editingMeetingRecord.id,
         {
           title: nullable(editingMeetingRecord.title),
-          project_id: nullable(editingMeetingRecord.project_id),
+          project_id: null,
           meeting_date: nullable(editingMeetingRecord.meeting_date),
           notes: `${FORMATTED_MEETING_NOTES_PREFIX}\n${STRUCTURED_MEETING_RECORD_PREFIX}\n${notesHtml}`,
-          google_meet_url: nullable(editingMeetingRecord.google_meet_url),
-          notes_doc_url: nullable(editingMeetingRecord.notes_doc_url),
+          google_meet_url: null,
+          notes_doc_url: null,
         },
         "id,project_id,title,meeting_date,summary,notes,google_meet_url,notes_doc_url",
       );
@@ -1452,7 +1566,7 @@ function App() {
       setMeetingDetail((current) =>
         current?.meeting.id === editingMeetingRecord.id ? { ...current, meeting: updatedMeeting } : current,
       );
-      const syncResult = await syncMeetingTodosToTasksAndCalendar(updatedMeeting, editingMeetingRecord);
+      const syncResult = await syncMeetingTodosToTasksAndCalendar(updatedMeeting, recordForSave);
       await loadDashboardData(false);
       setEditingMeetingRecord(null);
       setSaveMessage(`已儲存會議記錄，並同步 ${syncResult.taskCount} 筆待辦、${syncResult.calendarCount} 筆行事曆。`);
@@ -1477,6 +1591,13 @@ function App() {
     } : current);
   }
 
+  function setEditingMeetingDecisionProject(index: number, projectId: string) {
+    setEditingMeetingRecord((current) => current ? {
+      ...current,
+      decisions: current.decisions.map((decision, i) => i === index ? applyProjectDefaults(decision, projectId) : decision),
+    } : current);
+  }
+
   function addEditingMeetingDecisionRow() {
     setEditingMeetingRecord((current) => current ? { ...current, decisions: [...current.decisions, { ...emptyMeetingDecision }] } : current);
   }
@@ -1497,6 +1618,13 @@ function App() {
     setEditingMeetingRecord((current) => current ? {
       ...current,
       todos: current.todos.map((t, i) => i === index ? { ...t, [field]: value } : t),
+    } : current);
+  }
+
+  function setEditingMeetingTodoProject(index: number, projectId: string) {
+    setEditingMeetingRecord((current) => current ? {
+      ...current,
+      todos: current.todos.map((todo, i) => i === index ? applyProjectDefaults(todo, projectId) : todo),
     } : current);
   }
 
@@ -1548,6 +1676,15 @@ function App() {
     }));
   }
 
+  function setMeetingDecisionProject(index: number, projectId: string) {
+    setNewMeetingRecord((current) => ({
+      ...current,
+      decisions: current.decisions.map((decision, decisionIndex) =>
+        decisionIndex === index ? applyProjectDefaults(decision, projectId) : decision,
+      ),
+    }));
+  }
+
   function addMeetingDecisionRow() {
     setNewMeetingRecord((current) => ({
       ...current,
@@ -1573,6 +1710,15 @@ function App() {
     }));
   }
 
+  function setMeetingTodoProject(index: number, projectId: string) {
+    setNewMeetingRecord((current) => ({
+      ...current,
+      todos: current.todos.map((todo, todoIndex) =>
+        todoIndex === index ? applyProjectDefaults(todo, projectId) : todo,
+      ),
+    }));
+  }
+
   function addMeetingTodoRow() {
     setNewMeetingRecord((current) => ({
       ...current,
@@ -1593,9 +1739,13 @@ function App() {
   async function applyImportedRecord(record: Partial<NewMeetingRecordState>) {
     setNewMeetingRecord((current) => ({
       ...current,
-      ...record,
-      decisions: record.decisions && record.decisions.length > 0 ? record.decisions : current.decisions,
-      todos: record.todos && record.todos.length > 0 ? record.todos : current.todos,
+      ...hydrateMeetingRecordProjects({ ...current, ...record }),
+      decisions: record.decisions && record.decisions.length > 0
+        ? hydrateMeetingRecordProjects({ ...current, ...record, decisions: record.decisions }).decisions
+        : current.decisions,
+      todos: record.todos && record.todos.length > 0
+        ? hydrateMeetingRecordProjects({ ...current, ...record, todos: record.todos }).todos
+        : current.todos,
     }));
     setImportMode("idle");
     setImportStatus("匯入完成，請確認並補充欄位後儲存。");
@@ -2018,6 +2168,18 @@ function App() {
           ))}
         </select>
       </label>
+    );
+  }
+
+  function meetingProjectOptions() {
+    return (
+      <>
+        <option value="">請選擇專案</option>
+        {projects.map((project) => (
+          <option key={project.id} value={project.id}>{project.name}</option>
+        ))}
+        <option value={NEW_PROJECT_VALUE}>新增專案...</option>
+      </>
     );
   }
 
@@ -2484,11 +2646,6 @@ function App() {
               <p>{selectedMeeting.meeting_date}</p>
             </div>
             <div className="row-actions">
-              {selectedMeeting.google_meet_url ? (
-                <a href={selectedMeeting.google_meet_url} target="_blank" rel="noreferrer" title="開啟 Google Meet">
-                  <ExternalLink size={16} />
-                </a>
-              ) : null}
               {selectedMeetingNotesHtml && !selectedMeetingIsStructured ? (
                 <button
                   className="icon-button"
@@ -2525,10 +2682,6 @@ function App() {
                     會議日期
                     <input type="date" value={editingMeetingHtml.meeting_date} onChange={(e) => setEditingMeetingHtmlValue("meeting_date", e.target.value)} />
                   </label>
-                  <label>
-                    Google Meet 連結
-                    <input type="url" value={editingMeetingHtml.google_meet_url} onChange={(e) => setEditingMeetingHtmlValue("google_meet_url", e.target.value)} />
-                  </label>
                   <label className="meeting-html-editor">
                     會議記錄 HTML
                     <textarea value={editingMeetingHtml.html} onChange={(e) => setEditingMeetingHtmlValue("html", e.target.value)} />
@@ -2548,27 +2701,12 @@ function App() {
                 <h3>會議基本資訊</h3>
                 <div className="edit-grid">
                   <label>會議名稱<input value={editingMeetingRecord.title} onChange={(e) => setEditingMeetingRecordValue("title", e.target.value)} /></label>
-                  <label>
-                    所屬專案
-                    <select value={editingMeetingRecord.project_id} onChange={(e) => setEditingMeetingRecordValue("project_id", e.target.value)}>
-                      <option value="">未連結專案</option>
-                      {projects.map((project) => (
-                        <option key={project.id} value={project.id}>{project.name}</option>
-                      ))}
-                    </select>
-                  </label>
                   <label>會議日期<input type="date" value={editingMeetingRecord.meeting_date} onChange={(e) => setEditingMeetingRecordValue("meeting_date", e.target.value)} /></label>
                   <label>會議方式<input value={editingMeetingRecord.meeting_method} onChange={(e) => setEditingMeetingRecordValue("meeting_method", e.target.value)} /></label>
-                  <label>主持人<input list="rotary-members" value={editingMeetingRecord.host} onChange={(e) => setEditingMeetingRecordValue("host", e.target.value)} /></label>
                   <div className="meeting-textarea-group">
                     <label>與會人員<textarea value={editingMeetingRecord.attendees} onChange={(e) => setEditingMeetingRecordValue("attendees", e.target.value)} /></label>
                     {memberChips(editingMeetingRecord.attendees, (v) => setEditingMeetingRecordValue("attendees", v))}
                   </div>
-                  <div className="meeting-textarea-group">
-                    <label>待確認出席<textarea value={editingMeetingRecord.pending_attendees} onChange={(e) => setEditingMeetingRecordValue("pending_attendees", e.target.value)} /></label>
-                    {memberChips(editingMeetingRecord.pending_attendees, (v) => setEditingMeetingRecordValue("pending_attendees", v))}
-                  </div>
-                  <label>Google Meet 連結<input type="url" value={editingMeetingRecord.google_meet_url} onChange={(e) => setEditingMeetingRecordValue("google_meet_url", e.target.value)} /></label>
                 </div>
               </section>
               <section className="meeting-form-section">
@@ -2584,7 +2722,16 @@ function App() {
                         <button className="icon-button" type="button" onClick={() => removeEditingMeetingDecisionRow(index)} title="移除此決議" aria-label="移除此決議"><X size={14} /></button>
                       </div>
                       <div className="edit-grid meeting-decision-grid">
-                        <label>事項主題<input value={decision.topic} onChange={(e) => setEditingMeetingDecisionValue(index, "topic", e.target.value)} /></label>
+                        <label>
+                          所屬專案
+                          <select value={decision.project_id} onChange={(e) => setEditingMeetingDecisionProject(index, e.target.value)}>
+                            {meetingProjectOptions()}
+                          </select>
+                        </label>
+                        {decision.project_id === NEW_PROJECT_VALUE ? (
+                          <label>新增專案名稱<input value={decision.project_name} onChange={(e) => setEditingMeetingDecisionValue(index, "project_name", e.target.value)} /></label>
+                        ) : null}
+                        <label>項目<input value={decision.topic} onChange={(e) => setEditingMeetingDecisionValue(index, "topic", e.target.value)} /></label>
                         <div className="meeting-textarea-group">
                           <label>指定負責人<input list="rotary-members" value={decision.owner} onChange={(e) => setEditingMeetingDecisionValue(index, "owner", e.target.value)} /></label>
                           {memberChips(decision.owner, (v) => setEditingMeetingDecisionValue(index, "owner", v))}
@@ -2593,8 +2740,14 @@ function App() {
                           <label>合作對象<input list="rotary-members" value={decision.collaborators} onChange={(e) => setEditingMeetingDecisionValue(index, "collaborators", e.target.value)} /></label>
                           {memberChips(decision.collaborators, (v) => setEditingMeetingDecisionValue(index, "collaborators", v))}
                         </div>
-                        <label>時間／進度<input value={decision.schedule} onChange={(e) => setEditingMeetingDecisionValue(index, "schedule", e.target.value)} /></label>
-                        <label>內容備註<textarea value={decision.notes} onChange={(e) => setEditingMeetingDecisionValue(index, "notes", e.target.value)} /></label>
+                        <label>
+                          進度
+                          <select value={decision.status} onChange={(e) => setEditingMeetingDecisionValue(index, "status", e.target.value as NewMeetingDecisionRow["status"])}>
+                            {meetingDecisionStatusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                          </select>
+                        </label>
+                        <label>項目預計完成時間<input type="date" value={decision.schedule} onChange={(e) => setEditingMeetingDecisionValue(index, "schedule", e.target.value)} /></label>
+                        <label className="meeting-form-field--full">內容備註<textarea value={decision.notes} onChange={(e) => setEditingMeetingDecisionValue(index, "notes", e.target.value)} /></label>
                       </div>
                     </article>
                   ))}
@@ -2613,9 +2766,22 @@ function App() {
                         <button className="icon-button" type="button" onClick={() => removeEditingMeetingTodoRow(index)} title="移除此待辦" aria-label="移除此待辦"><X size={14} /></button>
                       </div>
                       <div className="edit-grid meeting-todo-grid">
+                        <label>
+                          所屬專案
+                          <select value={todo.project_id} onChange={(e) => setEditingMeetingTodoProject(index, e.target.value)}>
+                            {meetingProjectOptions()}
+                          </select>
+                        </label>
+                        {todo.project_id === NEW_PROJECT_VALUE ? (
+                          <label>新增專案名稱<input value={todo.project_name} onChange={(e) => setEditingMeetingTodoValue(index, "project_name", e.target.value)} /></label>
+                        ) : null}
                         <div className="meeting-textarea-group">
                           <label>負責人<input list="rotary-members" value={todo.owner} onChange={(e) => setEditingMeetingTodoValue(index, "owner", e.target.value)} /></label>
                           {memberChips(todo.owner, (v) => setEditingMeetingTodoValue(index, "owner", v))}
+                        </div>
+                        <div className="meeting-textarea-group">
+                          <label>合作對象<input list="rotary-members" value={todo.collaborators} onChange={(e) => setEditingMeetingTodoValue(index, "collaborators", e.target.value)} /></label>
+                          {memberChips(todo.collaborators, (v) => setEditingMeetingTodoValue(index, "collaborators", v))}
                         </div>
                         <label>待辦事項<textarea value={todo.task} onChange={(e) => setEditingMeetingTodoValue(index, "task", e.target.value)} /></label>
                         <label>期限<input type="date" value={todo.due} onChange={(e) => setEditingMeetingTodoValue(index, "due", e.target.value)} /></label>
@@ -2890,7 +3056,7 @@ function App() {
                   </span>
                   {isEditing("task", task.id) ? (
                     <div className="task-edit-row">
-                      <div className="edit-grid">
+                      <div className="edit-grid meeting-decision-grid">
                         {editInput("title", "任務標題")}
                         {editSelect("status", "狀態", taskStatusOptions)}
                         {editSelect("priority", "優先級", priorityOptions)}
@@ -3471,21 +3637,9 @@ function App() {
                 <h4>會議資訊</h4>
                 <div className="edit-grid">
                   {newMeetingInput("title", "會議名稱")}
-                  <label>
-                    所屬專案
-                    <select value={newMeetingRecord.project_id} onChange={(event) => setNewMeetingRecordValue("project_id", event.target.value)}>
-                      <option value="">未連結專案</option>
-                      {projects.map((project) => (
-                        <option key={project.id} value={project.id}>{project.name}</option>
-                      ))}
-                    </select>
-                  </label>
                   {newMeetingInput("meeting_date", "會議日期", "date")}
                   {newMeetingInput("meeting_method", "會議方式")}
-                  {newMeetingInput("host", "主持人", "text", true)}
                   {newMeetingTextarea("attendees", "與會人員", true)}
-                  {newMeetingTextarea("pending_attendees", "待確認出席", true)}
-                  {newMeetingInput("google_meet_url", "Google Meet 連結", "url")}
                 </div>
               </section>
 
@@ -3507,7 +3661,19 @@ function App() {
                       </div>
                       <div className="edit-grid">
                         <label>
-                          決議主題
+                          所屬專案
+                          <select value={decision.project_id} onChange={(event) => setMeetingDecisionProject(index, event.target.value)}>
+                            {meetingProjectOptions()}
+                          </select>
+                        </label>
+                        {decision.project_id === NEW_PROJECT_VALUE ? (
+                          <label>
+                            新增專案名稱
+                            <input value={decision.project_name} onChange={(event) => setMeetingDecisionValue(index, "project_name", event.target.value)} />
+                          </label>
+                        ) : null}
+                        <label>
+                          項目
                           <input value={decision.topic} onChange={(event) => setMeetingDecisionValue(index, "topic", event.target.value)} />
                         </label>
                         <div className="meeting-textarea-group">
@@ -3525,10 +3691,13 @@ function App() {
                           {memberChips(decision.collaborators, (v) => setMeetingDecisionValue(index, "collaborators", v))}
                         </div>
                         <label>
-                          時間／進度
-                          <input value={decision.schedule} onChange={(event) => setMeetingDecisionValue(index, "schedule", event.target.value)} />
+                          進度
+                          <select value={decision.status} onChange={(event) => setMeetingDecisionValue(index, "status", event.target.value as NewMeetingDecisionRow["status"])}>
+                            {meetingDecisionStatusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                          </select>
                         </label>
-                        <label style={{ gridColumn: "1 / -1" }}>
+                        <label>項目預計完成時間<input type="date" value={decision.schedule} onChange={(event) => setMeetingDecisionValue(index, "schedule", event.target.value)} /></label>
+                        <label className="meeting-form-field--full">
                           內容
                           <textarea value={decision.notes} onChange={(event) => setMeetingDecisionValue(index, "notes", event.target.value)} />
                         </label>
@@ -3555,12 +3724,31 @@ function App() {
                         </button>
                       </div>
                       <div className="edit-grid meeting-todo-grid">
+                        <label>
+                          所屬專案
+                          <select value={todo.project_id} onChange={(event) => setMeetingTodoProject(index, event.target.value)}>
+                            {meetingProjectOptions()}
+                          </select>
+                        </label>
+                        {todo.project_id === NEW_PROJECT_VALUE ? (
+                          <label>
+                            新增專案名稱
+                            <input value={todo.project_name} onChange={(event) => setMeetingTodoValue(index, "project_name", event.target.value)} />
+                          </label>
+                        ) : null}
                         <div className="meeting-textarea-group">
                           <label>
                             負責人
                             <input list="rotary-members" value={todo.owner} onChange={(event) => setMeetingTodoValue(index, "owner", event.target.value)} />
                           </label>
                           {memberChips(todo.owner, (v) => setMeetingTodoValue(index, "owner", v))}
+                        </div>
+                        <div className="meeting-textarea-group">
+                          <label>
+                            合作對象
+                            <input list="rotary-members" value={todo.collaborators} onChange={(event) => setMeetingTodoValue(index, "collaborators", event.target.value)} />
+                          </label>
+                          {memberChips(todo.collaborators, (v) => setMeetingTodoValue(index, "collaborators", v))}
                         </div>
                         <label>
                           待辦事項
